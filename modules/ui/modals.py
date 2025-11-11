@@ -295,31 +295,6 @@ class DescriptionModal(discord.ui.Modal):
                 ephemeral=True
             )
             
-            # Tentar enviar DM (opcional)
-            try:
-                dm_embed = discord.Embed(
-                    title="🎫 Ticket Criado",
-                    description=f"Seu ticket foi criado no servidor **{channel.guild.name}**",
-                    color=0x0099ff  # Azul
-                )
-                dm_embed.add_field(
-                    name="📍 Canal do ticket:",
-                    value=f"#{channel.name}",
-                    inline=False
-                )
-                dm_embed.add_field(
-                    name="🏷️ Motivo:",
-                    value=self.reason,
-                    inline=False
-                )
-                
-                await user.send(embed=dm_embed)
-                logger.info(f"DM enviada para {user} sobre ticket {ticket_id}")
-            except discord.Forbidden:
-                logger.info(f"Não foi possível enviar DM para {user}")
-            except Exception as e:
-                logger.error(f"Erro ao enviar DM: {e}")
-            
             logger.info(f"Ticket {ticket_id} {'reaberto' if is_reopened else 'criado'} por {user} no canal {channel.name}")
             
         except Exception as e:

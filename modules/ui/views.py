@@ -120,14 +120,6 @@ class TicketControlView(discord.ui.View):
                     delete_after=300  # 5 minutos
                 )
                 return
-                
-            if ticket['status'] == 'closed':
-                await interaction.response.send_message(
-                    "❌ Este ticket já está fechado.",
-                    ephemeral=True,
-                    delete_after=300  # 5 minutos
-                )
-                return
             
             await interaction.response.defer()
             

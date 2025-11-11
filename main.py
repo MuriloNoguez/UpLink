@@ -118,12 +118,6 @@ class TicketBot(commands.Bot):
         logger.info(f"Bot logado como {self.user}")
         logger.info(f"Conectado a {len(self.guilds)} servidor(es)")
         
-        # Auto-setup em canal específico (opcional)
-        try:
-            await auto_setup_tickets(self)
-        except Exception as e:
-            logger.error(f"Erro no auto setup: {e}")
-        
         # Definir status
         await self.change_presence(
             activity=discord.Activity(
