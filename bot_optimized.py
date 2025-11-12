@@ -69,6 +69,13 @@ class OptimizedTicketBot(commands.Bot):
         # Comandos
         await self.add_cog(TicketCommands(self))
         
+        # Sincronizar comandos slash (apenas uma vez)
+        try:
+            synced = await self.tree.sync()
+            logger.info(f"🔄 {len(synced)} comandos sincronizados com Discord")
+        except Exception as e:
+            logger.error(f"❌ Erro ao sincronizar comandos: {e}")
+        
         # Views persistentes
         self.add_view(TicketView())
         self.add_view(TicketControlView())
