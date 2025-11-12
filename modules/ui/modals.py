@@ -78,6 +78,33 @@ class DescriptionModal(discord.ui.Modal):
             guild = interaction.guild
             user = interaction.user
             
+            # Checar permissões do bot no servidor antes de operações que podem falhar com 403
+            try:
+                bot_member = guild.me
+                bot_perms = bot_member.guild_permissions if bot_member else None
+            except Exception:
+                bot_perms = None
+
+            missing_perms = []
+            if not bot_perms or not bot_perms.manage_channels:
+                missing_perms.append('Manage Channels')
+            if not bot_perms or not bot_perms.send_messages:
+                missing_perms.append('Send Messages')
+            if not bot_perms or not bot_perms.embed_links:
+                missing_perms.append('Embed Links')
+            if not bot_perms or not bot_perms.attach_files:
+                missing_perms.append('Attach Files')
+
+            if missing_perms:
+                # Informar o usuário e abortar a criação do ticket de forma amigável
+                perms_list = ', '.join(missing_perms)
+                logger.error(f"Bot sem permissões necessárias no servidor {guild.name}: {perms_list}")
+                await interaction.followup.send(
+                    f"❌ O bot não possui permissões necessárias neste servidor: {perms_list}. Peça a um administrador para conceder essas permissões ao cargo do bot e tente novamente.",
+                    ephemeral=True
+                )
+                return
+            
             # Verificar se já existe um ticket/canal para este usuário
             latest_ticket = interaction.client.db.get_user_latest_ticket(user.id)
             existing_channel = None
@@ -125,10 +152,7 @@ class DescriptionModal(discord.ui.Modal):
                     )
                     logger.info(f"Categoria '{BOT_CONFIG['tickets_category_name']}' criada no servidor {guild.name}")
                 
-                # Buscar cargo "Suporte TI"
-                support_role = discord.utils.get(guild.roles, name=BOT_CONFIG['support_role_name'])
-                
-                # Configurar permissões do canal
+                # Configurar permissões do canal (apenas administradores e dono do ticket)
                 overwrites = {
                     guild.default_role: discord.PermissionOverwrite(read_messages=False),
                     user: discord.PermissionOverwrite(
@@ -145,14 +169,15 @@ class DescriptionModal(discord.ui.Modal):
                     )
                 }
                 
-                # Adicionar permissões para o cargo de suporte se existir
-                if support_role:
-                    overwrites[support_role] = discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=True,
-                        manage_messages=True,
-                        embed_links=True
-                    )
+                # Adicionar permissões para todos os administradores do servidor
+                for member in guild.members:
+                    if member.guild_permissions.administrator and not member.bot:
+                        overwrites[member] = discord.PermissionOverwrite(
+                            read_messages=True,
+                            send_messages=True,
+                            manage_messages=True,
+                            embed_links=True
+                        )
                 
                 # Criar canal do ticket
                 channel_name = f"ticket-{user.name.lower()}"
@@ -170,9 +195,6 @@ class DescriptionModal(discord.ui.Modal):
                     reason=self.reason,
                     description=self.description.value
                 )
-            else:
-                # Se está reabrindo, ainda precisamos buscar o support_role
-                support_role = discord.utils.get(guild.roles, name=BOT_CONFIG['support_role_name'])
             
             if not ticket_id:
                 if not is_reopened and channel:
@@ -252,10 +274,9 @@ class DescriptionModal(discord.ui.Modal):
             control_view = TicketControlView()
             
             # Enviar mensagem no canal do ticket
-            support_role_mention = f"<@&1382008028517109832>"  # Usar ID direto do cargo
             await channel.send(
                 content=f"🔔 **{user.mention}, seu ticket foi {'reaberto' if is_reopened else 'criado'}!**\n"
-                       f"👥 **Equipe de suporte**: {support_role_mention}",
+                       f"👥 **Administradores do servidor** foram notificados e podem ver este canal.",
                 embed=embed,
                 view=control_view
             )

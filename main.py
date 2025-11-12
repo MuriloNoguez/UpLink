@@ -22,6 +22,7 @@ from config import validate_config, DISCORD_TOKEN, BOT_CONFIG, EMBED_COLORS
 from database import DatabaseManager
 from modules.ui.views import TicketView, TicketControlView
 from utils.helpers import close_ticket_channel, auto_setup_tickets
+from keep_alive import setup_keep_alive
 
 # Configuração de logging
 logging.basicConfig(
@@ -112,6 +113,13 @@ class TicketBot(commands.Bot):
         if not self.auto_close_tickets.is_running():
             self.auto_close_tickets.start()
             logger.info("Task de fechamento automático iniciada")
+            
+        # Iniciar sistema keep-alive para manter bot ativo no Render
+        try:
+            await setup_keep_alive(self)
+            logger.info("Sistema Keep-Alive iniciado")
+        except Exception as e:
+            logger.error(f"Erro ao iniciar Keep-Alive: {e}")
     
     async def on_ready(self):
         """Evento disparado quando o bot está pronto."""
