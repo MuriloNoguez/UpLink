@@ -180,7 +180,7 @@ class DescriptionModal(discord.ui.Modal):
                         )
                 
                 # Criar canal do ticket
-                channel_name = f"ticket-{user.name.lower()}"
+                channel_name = f"💻┃{user.name.lower()}"
                 channel = await category.create_text_channel(
                     name=channel_name,
                     overwrites=overwrites,
@@ -276,7 +276,7 @@ class DescriptionModal(discord.ui.Modal):
             # Enviar mensagem no canal do ticket
             await channel.send(
                 content=f"🔔 **{user.mention}, seu ticket foi {'reaberto' if is_reopened else 'criado'}!**\n"
-                       f"👥 **Administradores do servidor** foram notificados e podem ver este canal.",
+                       f"� <@&1382008028517109832> responderá em breve.",
                 embed=embed,
                 view=control_view
             )
