@@ -15,7 +15,7 @@ from discord.ext import commands, tasks
 
 from config import validate_config, DISCORD_TOKEN, BOT_CONFIG, EMBED_COLORS
 from database import DatabaseManager
-from modules.ui.views import TicketView, TicketControlView
+from modules.ui.views import TicketView, TicketControlView, ReopenTicketView
 from modules.commands.ticket_commands import TicketCommands
 from utils.helpers import close_ticket_channel
 from keep_alive import setup_keep_alive
@@ -79,6 +79,7 @@ class OptimizedTicketBot(commands.Bot):
         # Views persistentes
         self.add_view(TicketView())
         self.add_view(TicketControlView())
+        self.add_view(ReopenTicketView())
         
         # Tasks
         if not self.auto_close_tickets.is_running():

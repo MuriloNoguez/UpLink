@@ -48,27 +48,16 @@ class TicketView(discord.ui.View):
                     )
                     return
             
-            if paused_tickets:
-                ticket = paused_tickets[0]
-                await interaction.response.send_message(
-                    "⏸️ **Você tem um ticket pausado**\n"
-                    f"Seu ticket foi pausado por um administrador.\n"
-                    f"**Motivo:** {ticket['reason']}\n"
-                    f"**Pausado em:** <t:{int(ticket['paused_at'].timestamp())}:R>\n"
-                    f"**Por:** {ticket['paused_by']}\n\n"
-                    "Para abrir um novo ticket, entre em contato com um administrador.",
-                    ephemeral=True
-                )
-                return
+            # Remover verificação de tickets pausados - permitir reabertura direta
             
             # Se chegou até aqui, pode abrir um ticket novo ou reabrir o existente
             # Enviar select menu
             view = ReasonSelectView(interaction.client, interaction.guild)
             await interaction.response.send_message(
-                "🎫 **Selecione o motivo do seu chamado:**\n"
-                "💡 **Nota:** Se você já teve um ticket antes, o mesmo canal será reaberto mantendo o histórico!",
+                "🎫 **Selecione o motivo do seu chamado:**",
                 view=view,
-                ephemeral=True
+                ephemeral=True,
+                delete_after=300
             )
             
         except Exception as e:
@@ -95,43 +84,13 @@ class TicketControlView(discord.ui.View):
         if not (has_support_role or has_manage_channels):
             await interaction.response.send_message(
                 "❌ Apenas administradores podem usar este botão.",
-                ephemeral=True,
-                delete_after=300  # 5 minutos
+                ephemeral=True
             )
             return False
         
         return True
     
-    @discord.ui.button(
-        label="Fechar Ticket",
-        style=discord.ButtonStyle.danger,
-        emoji="🔒",
-        custom_id="close_ticket_button"
-    )
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Callback para fechar ticket."""
-        try:
-            # Verificar se é canal de ticket
-            ticket = interaction.client.db.get_ticket_by_channel(interaction.channel.id)
-            if not ticket:
-                await interaction.response.send_message(
-                    "❌ Este não é um canal de ticket válido.",
-                    ephemeral=True,
-                    delete_after=300  # 5 minutos
-                )
-                return
-            
-            await interaction.response.defer()
-            
-            # Fechar o ticket
-            await interaction.client.close_ticket_channel(interaction.channel)
-            
-        except Exception as e:
-            logger.error(f"Erro ao fechar ticket via botão: {e}")
-            await interaction.followup.send(
-                "❌ Erro interno ao fechar ticket.",
-                ephemeral=True
-            )
+
 
 
 class ReopenTicketView(discord.ui.View):
@@ -179,8 +138,7 @@ class ReopenTicketView(discord.ui.View):
             
             view = ReasonSelectView(interaction.client, interaction.guild)
             await interaction.response.send_message(
-                "🎫 **Selecione o motivo da reabertura:**\n"
-                "💡 **Nota:** O histórico anterior será mantido!",
+                "🎫 **Selecione o motivo da reabertura:**",
                 view=view,
                 ephemeral=True
             )
@@ -191,3 +149,4 @@ class ReopenTicketView(discord.ui.View):
                 "❌ Erro interno ao reabrir ticket.",
                 ephemeral=True
             )
+

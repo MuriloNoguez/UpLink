@@ -50,7 +50,7 @@ class ReasonSelect(discord.ui.Select):
             logger.error(f"Erro no callback do select: {e}")
             await interaction.followup.send(
                 "❌ Ocorreu um erro. Tente novamente.",
-                ephemeral=True
+                ephemeral=True, delete_after=60
             )
 
 
@@ -101,7 +101,7 @@ class DescriptionModal(discord.ui.Modal):
                 logger.error(f"Bot sem permissões necessárias no servidor {guild.name}: {perms_list}")
                 await interaction.followup.send(
                     f"❌ O bot não possui permissões necessárias neste servidor: {perms_list}. Peça a um administrador para conceder essas permissões ao cargo do bot e tente novamente.",
-                    ephemeral=True
+                    ephemeral=True, delete_after=60
                 )
                 return
             
@@ -201,7 +201,7 @@ class DescriptionModal(discord.ui.Modal):
                     await channel.delete(reason="Erro ao criar ticket no banco")
                 await interaction.followup.send(
                     "❌ Erro ao criar ticket. Tente novamente.",
-                    ephemeral=True
+                    ephemeral=True, delete_after=60
                 )
                 return
             
@@ -311,10 +311,21 @@ class DescriptionModal(discord.ui.Modal):
                 inline=False
             )
             
-            await interaction.followup.send(
+            message = await interaction.followup.send(
                 embed=embed_response,
                 ephemeral=True
             )
+            
+            # Agendar exclusão da mensagem após 60 segundos
+            import asyncio
+            async def delete_after_delay():
+                try:
+                    await asyncio.sleep(60)
+                    await message.delete()
+                except Exception:
+                    pass  # Ignorar erros se a mensagem já foi deletada
+            
+            asyncio.create_task(delete_after_delay())
             
             logger.info(f"Ticket {ticket_id} {'reaberto' if is_reopened else 'criado'} por {user} no canal {channel.name}")
             
@@ -340,8 +351,8 @@ class ReasonSelectView(discord.ui.View):
         self.add_item(ReasonSelect(bot, guild))
 
 
-class PauseStatusSelect(discord.ui.Select):
-    """Select menu para escolha do status do ticket pausado."""
+class CloseStatusSelect(discord.ui.Select):
+    """Select menu para escolha do status do ticket fechado."""
     
     def __init__(self, ticket):
         self.ticket = ticket
@@ -390,12 +401,12 @@ class PauseStatusSelect(discord.ui.Select):
             logger.error(f"Erro no callback do pause select: {e}")
             await interaction.followup.send(
                 "❌ Ocorreu um erro. Tente novamente.",
-                ephemeral=True
+                ephemeral=True, delete_after=60
             )
 
 
 class PauseDescriptionModal(discord.ui.Modal):
-    """Modal para capturar a descrição do status pausado."""
+    """Modal para capturar a descrição do status fechado."""
     
     def __init__(self, ticket: dict, status: str):
         self.ticket = ticket
@@ -445,8 +456,8 @@ class PauseDescriptionModal(discord.ui.Modal):
             channel = interaction.channel
             user = interaction.user
             
-            # Pausar o ticket no banco
-            if interaction.client.db.pause_ticket(channel.id, str(user)):
+            # Fechar o ticket no banco
+            if interaction.client.db.close_ticket(channel.id):
                 # Modificar permissões do canal
                 ticket_owner_id = self.ticket['user_id']
                 ticket_owner = interaction.guild.get_member(ticket_owner_id)
@@ -459,9 +470,9 @@ class PauseDescriptionModal(discord.ui.Modal):
                         view_channel=True  # Ainda pode ver mas não interagir
                     )
                 
-                # Renomear canal com emoji de pausa
-                new_name = f"⏸️{channel.name}"
-                if not channel.name.startswith("⏸️"):
+                # Renomear canal com emoji de fechado
+                new_name = f"🔒{channel.name}"
+                if not channel.name.startswith("🔒"):
                     await channel.edit(name=new_name)
                 
                 # Definir cores e emojis baseados no status
@@ -500,26 +511,27 @@ class PauseDescriptionModal(discord.ui.Modal):
                 
                 await channel.send(embed=embed, view=reopen_view)
                 
-                await interaction.followup.send(
-                    f"✅ Ticket pausado com status: **{config['title']}**"
-                )
-                
-                logger.info(f"Ticket {self.ticket['id']} pausado por {user} com status: {self.status}")
+                logger.info(f"Ticket {self.ticket['id']} fechado por {user} com status: {self.status}")
             else:
                 await interaction.followup.send(
-                    "❌ Erro ao pausar ticket."
+                    "❌ Erro ao fechar ticket."
                 )
             
         except Exception as e:
-            logger.error(f"Erro ao pausar ticket: {e}")
+            logger.error(f"Erro ao fechar ticket: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             await interaction.followup.send(
-                "❌ Erro ao pausar ticket."
+                f"❌ Erro ao fechar ticket: {str(e)}"
             )
 
 
-class PauseStatusView(discord.ui.View):
-    """View temporária para seleção do status de pausa."""
+class CloseStatusView(discord.ui.View):
+    """View temporária para seleção do status de fechamento."""
     
     def __init__(self, ticket):
         super().__init__(timeout=300)  # 5 minutos
-        self.add_item(PauseStatusSelect(ticket))
+        self.add_item(CloseStatusSelect(ticket))
+
+
+

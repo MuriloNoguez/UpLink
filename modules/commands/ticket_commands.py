@@ -30,7 +30,8 @@ class TicketCommands(commands.Cog):
                 "🎫 **Sistema de Tickets**\n"
                 "Para abrir um ticket, use o sistema configurado no canal de suporte.\n"
                 "Ou aguarde, estamos preparando a interface...",
-                ephemeral=True
+                ephemeral=True,
+                delete_after=60
             )
         except Exception as e:
             logger.error(f"Erro no comando ticket: {e}")
@@ -110,13 +111,14 @@ class TicketCommands(commands.Cog):
             
             embed.set_footer(text="Sistema mantém o bot ativo a cada 30 minutos")
             
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=60)
             
         except Exception as e:
             logger.error(f"Erro no comando keepalive_status: {e}")
             await interaction.response.send_message(
                 "❌ Erro ao obter status do keep-alive.",
-                ephemeral=True
+                ephemeral=True,
+                delete_after=60
             )
     
     @discord.app_commands.command(name="setup_tickets", description="Configura o sistema de tickets em um canal")
@@ -214,10 +216,10 @@ class TicketCommands(commands.Cog):
                 "❌ Erro ao fechar ticket."
             )
     
-    @discord.app_commands.command(name="pause", description="Pausar ticket com status específico (apenas administradores)")
-    async def pause_ticket(self, interaction: discord.Interaction):
+    @discord.app_commands.command(name="close", description="Fechar ticket com status específico (apenas administradores)")
+    async def close_ticket_with_status(self, interaction: discord.Interaction):
         """
-        Comando para pausar um ticket com select de status.
+        Comando para fechar um ticket com select de status.
         
         Args:
             interaction: Interação do Discord
@@ -241,9 +243,9 @@ class TicketCommands(commands.Cog):
                 )
                 return
                 
-            if ticket['status'] == 'paused':
+            if ticket['status'] == 'closed':
                 await interaction.response.send_message(
-                    "❌ Este ticket já está pausado.",
+                    "❌ Este ticket já está fechado.",
                     ephemeral=True
                 )
                 return
@@ -261,19 +263,19 @@ class TicketCommands(commands.Cog):
                 return
             
             # Criar view com select de status
-            from modules.ui.modals import PauseStatusView
-            view = PauseStatusView(ticket)
+            from modules.ui.modals import CloseStatusView
+            view = CloseStatusView(ticket)
             
             await interaction.response.send_message(
-                "📋 **Pausar Ticket**\n\nSelecione o status do ticket:",
+                "📋 **Fechar Ticket**\n\nSelecione o status do ticket:",
                 view=view,
                 ephemeral=True
             )
             
         except Exception as e:
-            logger.error(f"Erro no comando pause: {e}")
+            logger.error(f"Erro no comando close: {e}")
             await interaction.response.send_message(
-                "❌ Erro ao pausar ticket.",
+                "❌ Erro ao fechar ticket.",
                 ephemeral=True
             )
     
