@@ -463,17 +463,33 @@ class PauseDescriptionModal(discord.ui.Modal):
                 ticket_owner = interaction.guild.get_member(ticket_owner_id)
                 
                 if ticket_owner:
-                    await channel.set_permissions(
-                        ticket_owner,
-                        send_messages=False,
-                        add_reactions=False,
-                        view_channel=True  # Ainda pode ver mas não interagir
-                    )
+                    try:
+                        await channel.set_permissions(
+                            ticket_owner,
+                            send_messages=False,
+                            add_reactions=False,
+                            view_channel=True  # Ainda pode ver mas não interagir
+                        )
+                    except discord.HTTPException as e:
+                        if e.status == 429:  # Rate limited
+                            logger.warning(f"Rate limited ao alterar permissões do canal {channel.name} - continuando com fechamento")
+                        else:
+                            logger.error(f"Erro ao alterar permissões do canal: {e}")
+                    except Exception as e:
+                        logger.error(f"Erro inesperado ao alterar permissões: {e}")
                 
                 # Renomear canal com emoji de fechado
                 new_name = f"🔒{channel.name}"
                 if not channel.name.startswith("🔒"):
-                    await channel.edit(name=new_name)
+                    try:
+                        await channel.edit(name=new_name)
+                    except discord.HTTPException as e:
+                        if e.status == 429:  # Rate limited
+                            logger.warning(f"Rate limited ao renomear canal {channel.name} - continuando com fechamento")
+                        else:
+                            logger.error(f"Erro ao renomear canal: {e}")
+                    except Exception as e:
+                        logger.error(f"Erro inesperado ao renomear canal: {e}")
                 
                 # Definir cores e emojis baseados no status
                 status_config = {
@@ -509,9 +525,19 @@ class PauseDescriptionModal(discord.ui.Modal):
                 from .views import ReopenTicketView
                 reopen_view = ReopenTicketView()
                 
-                await channel.send(embed=embed, view=reopen_view)
-                
-                logger.info(f"Ticket {self.ticket['id']} fechado por {user} com status: {self.status}")
+                try:
+                    await channel.send(embed=embed, view=reopen_view)
+                    logger.info(f"Ticket {self.ticket['id']} fechado por {user} com status: {self.status}")
+                except discord.HTTPException as e:
+                    if e.status == 429:  # Rate limited
+                        logger.warning(f"Rate limited ao enviar mensagem de fechamento - ticket foi fechado no banco")
+                    else:
+                        logger.error(f"Erro ao enviar mensagem de fechamento: {e}")
+                except Exception as e:
+                    logger.error(f"Erro inesperado ao enviar mensagem: {e}")
+                    
+                # Log independente do sucesso do envio da mensagem
+                logger.info(f"Ticket {self.ticket['id']} fechado no banco por {user} com status: {self.status}")
             else:
                 await interaction.followup.send(
                     "❌ Erro ao fechar ticket."
