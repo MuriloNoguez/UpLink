@@ -35,6 +35,90 @@ class TicketCommands(commands.Cog):
         except Exception as e:
             logger.error(f"Erro no comando ticket: {e}")
     
+    @discord.app_commands.command(name="keepalive_status", description="📊 Verifica o status do sistema keep-alive")
+    async def keepalive_status(self, interaction: discord.Interaction):
+        """
+        Comando para verificar estatísticas do keep-alive.
+        Apenas administradores podem usar.
+        """
+        try:
+            # Verificar se o usuário tem permissão
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Apenas administradores podem verificar o status do keep-alive.",
+                    ephemeral=True
+                )
+                return
+            
+            # Verificar se o sistema keep-alive existe
+            if not hasattr(self.bot, 'keep_alive_system'):
+                await interaction.response.send_message(
+                    "⚠️ Sistema keep-alive não está inicializado.",
+                    ephemeral=True
+                )
+                return
+            
+            # Obter estatísticas
+            stats = self.bot.keep_alive_system.get_stats()
+            
+            # Criar embed com estatísticas
+            embed = discord.Embed(
+                title="📊 Status do Keep-Alive",
+                color=EMBED_COLORS['info'],
+                timestamp=datetime.now()
+            )
+            
+            # Status principal
+            status_icon = "🟢" if stats['is_running'] else "🔴"
+            embed.add_field(
+                name="Status",
+                value=f"{status_icon} {'Ativo' if stats['is_running'] else 'Inativo'}",
+                inline=True
+            )
+            
+            # Estatísticas
+            embed.add_field(
+                name="Pings Bem-sucedidos",
+                value=f"✅ {stats['successful_pings']}",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="Pings Falharam",
+                value=f"❌ {stats['failed_pings']}",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="Taxa de Sucesso",
+                value=f"📈 {stats['success_rate']}%",
+                inline=True
+            )
+            
+            embed.add_field(
+                name="Total de Pings",
+                value=f"📊 {stats['total_pings']}",
+                inline=True
+            )
+            
+            # Servidores conectados
+            embed.add_field(
+                name="Servidores Conectados",
+                value=f"🌐 {len(self.bot.guilds)}",
+                inline=True
+            )
+            
+            embed.set_footer(text="Sistema mantém o bot ativo a cada 30 minutos")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            logger.error(f"Erro no comando keepalive_status: {e}")
+            await interaction.response.send_message(
+                "❌ Erro ao obter status do keep-alive.",
+                ephemeral=True
+            )
+    
     @discord.app_commands.command(name="setup_tickets", description="Configura o sistema de tickets em um canal")
     @discord.app_commands.describe(channel="Canal onde será postado o embed de tickets")
     async def setup_tickets(self, interaction: discord.Interaction, channel: discord.TextChannel):

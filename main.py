@@ -151,6 +151,20 @@ class TicketBot(commands.Bot):
         """
         await close_ticket_channel(self, channel, auto_close)
     
+    async def close(self):
+        """Override do método close para limpeza adequada."""
+        # Parar tasks
+        if hasattr(self, 'auto_close_tickets') and self.auto_close_tickets.is_running():
+            self.auto_close_tickets.cancel()
+        
+        # Parar keep-alive
+        if hasattr(self, 'keep_alive_system'):
+            await self.keep_alive_system.stop()
+        
+        # Fechar conexão do bot
+        await super().close()
+        logger.info("🔚 Bot fechado corretamente")
+    
     async def on_error(self, event_method: str, *args, **kwargs):
         """Handler global de erros."""
         logger.error(f"Erro no evento {event_method}", exc_info=True)

@@ -11,16 +11,16 @@ load_dotenv()
 # Configurações do Discord
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 
-# Configurações do Banco de Dados
+# Configurações do Banco de Dados PostgreSQL
 DATABASE_CONFIG = {
-    'host': os.getenv('MYSQL_HOST', 'localhost'),
-    'port': int(os.getenv('MYSQL_PORT', '3306')),
-    'database': os.getenv('MYSQL_DB', 'bot_tickets'),
-    'user': os.getenv('MYSQL_USER', 'root'),
-    'password': os.getenv('MYSQL_PASSWORD', ''),
-    'autocommit': True,
-    'charset': 'utf8mb4',
-    'use_unicode': True
+    'url': os.getenv('DATABASE_URL', 'postgresql://user:password@localhost:5432/bot_tickets'),
+    'host': os.getenv('POSTGRES_HOST', 'localhost'),
+    'port': int(os.getenv('POSTGRES_PORT', '5432')),
+    'database': os.getenv('POSTGRES_DB', 'bot_tickets'),
+    'user': os.getenv('POSTGRES_USER', 'postgres'),
+    'password': os.getenv('POSTGRES_PASSWORD', ''),
+    'sslmode': os.getenv('POSTGRES_SSLMODE', 'prefer'),
+    'connect_timeout': int(os.getenv('POSTGRES_TIMEOUT', '30'))
 }
 
 # Configurações do Bot
