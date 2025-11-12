@@ -1,32 +1,18 @@
-# Arquivos de ambiente
+# Arquivos essenciais para ignorar
 .env
-
-# Logs
-*.log
-logs/
-
-# Ambiente virtual Python
 .venv/
 venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# Sistema operacional
+*.log
+logs/
 .DS_Store
 Thumbs.db
-
-# Backup de banco
-*.sql
-*.db
-
-# Arquivos temporários
+.vscode/
+.idea/
 *.tmp
 *.temp
+*.sql
+*.db
