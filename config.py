@@ -27,7 +27,7 @@ DATABASE_CONFIG = {
 BOT_CONFIG = {
     'command_prefix': '/',
     'support_role_name': 'Suporte TI',
-    'tickets_category_name': 'Tickets',
+    'tickets_category_name': 'Tecnologia',
     'auto_close_hours': 12,
     'auto_close_check_minutes': 30,
     'channel_names_to_setup': ['suporte', 'tickets', 'ajuda', 'support', 'help']
