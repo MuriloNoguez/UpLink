@@ -1,0 +1,20 @@
+# UpLink Bot - Dependências Otimizadas para Produção
+# Apenas as dependências essenciais para build mais rápido
+
+# Discord.py - Framework principal
+discord.py>=2.6.0,<3.0.0
+
+# PostgreSQL - Banco de dados
+psycopg2-binary>=2.9.0,<3.0.0
+
+# Variáveis de ambiente
+python-dotenv>=1.0.0,<2.0.0
+
+# HTTP requests (keep-alive) - versão específica para evitar conflitos
+aiohttp>=3.8.0,<4.0.0
+
+# Criptografia (Discord voice - opcional mas mantido para compatibilidade)
+PyNaCl>=1.5.0,<2.0.0
+
+# NOTA: Removidas dependências desnecessárias que estavam sendo puxadas automaticamente
+# Para builds ainda mais rápidos, considere remover PyNaCl se não usar recursos de voz
