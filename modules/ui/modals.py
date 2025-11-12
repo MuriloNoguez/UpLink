@@ -338,3 +338,188 @@ class ReasonSelectView(discord.ui.View):
     def __init__(self, bot=None, guild=None):
         super().__init__(timeout=300)  # 5 minutos
         self.add_item(ReasonSelect(bot, guild))
+
+
+class PauseStatusSelect(discord.ui.Select):
+    """Select menu para escolha do status do ticket pausado."""
+    
+    def __init__(self, ticket):
+        self.ticket = ticket
+        
+        options = [
+            discord.SelectOption(
+                label="Resolvido",
+                description="Problema foi resolvido",
+                emoji="✅",
+                value="resolvido"
+            ),
+            discord.SelectOption(
+                label="Chamado Aberto",
+                description="Chamado foi aberto em sistema externo",
+                emoji="📞",
+                value="chamado_aberto"
+            ),
+            discord.SelectOption(
+                label="Aguardando Resposta",
+                description="Aguardando resposta do usuário",
+                emoji="⏳",
+                value="aguardando_resposta"
+            ),
+            discord.SelectOption(
+                label="Em Análise",
+                description="Problema está sendo analisado",
+                emoji="🔍",
+                value="em_analise"
+            )
+        ]
+        
+        super().__init__(
+            placeholder="Selecione o status do ticket...",
+            options=options,
+            custom_id="pause_status_select"
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Callback executado quando uma opção é selecionada."""
+        try:
+            status = self.values[0]
+            modal = PauseDescriptionModal(self.ticket, status)
+            await interaction.response.send_modal(modal)
+            
+        except Exception as e:
+            logger.error(f"Erro no callback do pause select: {e}")
+            await interaction.followup.send(
+                "❌ Ocorreu um erro. Tente novamente.",
+                ephemeral=True
+            )
+
+
+class PauseDescriptionModal(discord.ui.Modal):
+    """Modal para capturar a descrição do status pausado."""
+    
+    def __init__(self, ticket: dict, status: str):
+        self.ticket = ticket
+        self.status = status
+        
+        # Definir títulos e labels baseados no status
+        status_info = {
+            "resolvido": {
+                "title": "✅ Ticket Resolvido",
+                "label": "Descrição da Resolução",
+                "placeholder": "Descreva como o problema foi resolvido..."
+            },
+            "chamado_aberto": {
+                "title": "📞 Chamado Aberto",
+                "label": "Informações do Chamado",
+                "placeholder": "Número do chamado, sistema utilizado, previsão..."
+            },
+            "aguardando_resposta": {
+                "title": "⏳ Aguardando Resposta",
+                "label": "O que está aguardando",
+                "placeholder": "Descreva o que foi solicitado ao usuário..."
+            },
+            "em_analise": {
+                "title": "🔍 Em Análise",
+                "label": "Status da Análise",
+                "placeholder": "Descreva o que está sendo analisado..."
+            }
+        }
+        
+        info = status_info.get(status, status_info["resolvido"])
+        super().__init__(title=info["title"])
+        
+        self.description = discord.ui.TextInput(
+            label=info["label"],
+            placeholder=info["placeholder"],
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+            required=True
+        )
+        self.add_item(self.description)
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        """Callback executado quando o modal é enviado."""
+        try:
+            await interaction.response.defer()
+            
+            channel = interaction.channel
+            user = interaction.user
+            
+            # Pausar o ticket no banco
+            if interaction.client.db.pause_ticket(channel.id, str(user)):
+                # Modificar permissões do canal
+                ticket_owner_id = self.ticket['user_id']
+                ticket_owner = interaction.guild.get_member(ticket_owner_id)
+                
+                if ticket_owner:
+                    await channel.set_permissions(
+                        ticket_owner,
+                        send_messages=False,
+                        add_reactions=False,
+                        view_channel=True  # Ainda pode ver mas não interagir
+                    )
+                
+                # Renomear canal com emoji de pausa
+                new_name = f"⏸️{channel.name}"
+                if not channel.name.startswith("⏸️"):
+                    await channel.edit(name=new_name)
+                
+                # Definir cores e emojis baseados no status
+                status_config = {
+                    "resolvido": {"color": 0x00ff00, "emoji": "✅", "title": "Ticket Resolvido"},
+                    "chamado_aberto": {"color": 0x0099ff, "emoji": "📞", "title": "Chamado Aberto"},
+                    "aguardando_resposta": {"color": 0xffa500, "emoji": "⏳", "title": "Aguardando Resposta"},
+                    "em_analise": {"color": 0x9932cc, "emoji": "🔍", "title": "Em Análise"}
+                }
+                
+                config = status_config.get(self.status, status_config["resolvido"])
+                
+                # Enviar embed com status
+                embed = discord.Embed(
+                    title=f"{config['emoji']} {config['title']}",
+                    description=self.description.value,
+                    color=config['color'],
+                    timestamp=datetime.now()
+                )
+                
+                embed.add_field(
+                    name="👤 Administrador",
+                    value=user.mention,
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="📅 Data",
+                    value=f"<t:{int(datetime.now().timestamp())}:f>",
+                    inline=True
+                )
+                
+                # Adicionar view com botão de reabrir
+                from .views import ReopenTicketView
+                reopen_view = ReopenTicketView()
+                
+                await channel.send(embed=embed, view=reopen_view)
+                
+                await interaction.followup.send(
+                    f"✅ Ticket pausado com status: **{config['title']}**"
+                )
+                
+                logger.info(f"Ticket {self.ticket['id']} pausado por {user} com status: {self.status}")
+            else:
+                await interaction.followup.send(
+                    "❌ Erro ao pausar ticket."
+                )
+            
+        except Exception as e:
+            logger.error(f"Erro ao pausar ticket: {e}")
+            await interaction.followup.send(
+                "❌ Erro ao pausar ticket."
+            )
+
+
+class PauseStatusView(discord.ui.View):
+    """View temporária para seleção do status de pausa."""
+    
+    def __init__(self, ticket):
+        super().__init__(timeout=300)  # 5 minutos
+        self.add_item(PauseStatusSelect(ticket))

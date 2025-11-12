@@ -214,10 +214,10 @@ class TicketCommands(commands.Cog):
                 "❌ Erro ao fechar ticket."
             )
     
-    @discord.app_commands.command(name="ticket_pause", description="Pausa o ticket atual (apenas administradores)")
-    async def ticket_pause(self, interaction: discord.Interaction):
+    @discord.app_commands.command(name="pause", description="Pausar ticket com status específico (apenas administradores)")
+    async def pause_ticket(self, interaction: discord.Interaction):
         """
-        Comando para pausar um ticket (apenas administradores).
+        Comando para pausar um ticket com select de status.
         
         Args:
             interaction: Interação do Discord
@@ -255,68 +255,26 @@ class TicketCommands(commands.Cog):
             
             if not (has_support_role or has_manage_channels):
                 await interaction.response.send_message(
-                    "❌ Apenas administradores podem pausar tickets.",
+                    "❌ Apenas administradores podem usar este comando.",
                     ephemeral=True
                 )
                 return
             
-            await interaction.response.defer()
+            # Criar view com select de status
+            from modules.ui.modals import PauseStatusView
+            view = PauseStatusView(ticket)
             
-            # Pausar o ticket no banco
-            if self.bot.db.pause_ticket(channel.id, str(user)):
-                # Modificar permissões do canal
-                ticket_owner_id = ticket['user_id']
-                ticket_owner = interaction.guild.get_member(ticket_owner_id)
-                
-                if ticket_owner:
-                    await channel.set_permissions(
-                        ticket_owner,
-                        send_messages=False,
-                        add_reactions=False,
-                        view_channel=True  # Ainda pode ver mas não interagir
-                    )
-                
-                # Renomear canal com emoji de pausa
-                new_name = f"⏸️{channel.name}"
-                if not channel.name.startswith("⏸️"):
-                    await channel.edit(name=new_name)
-                
-                # Enviar mensagem de pausa
-                embed = discord.Embed(
-                    title="⏸️ Ticket Pausado",
-                    description="Este ticket foi pausado por um administrador.",
-                    color=EMBED_COLORS['paused'],
-                    timestamp=datetime.now()
-                )
-                
-                embed.add_field(
-                    name="👤 Pausado por",
-                    value=user.mention,
-                    inline=True
-                )
-                
-                embed.add_field(
-                    name="📋 Informação",
-                    value="O usuário não pode mais abrir novos tickets até que este seja despausado ou fechado.",
-                    inline=False
-                )
-                
-                await channel.send(embed=embed)
-                
-                await interaction.followup.send(
-                    "✅ Ticket pausado com sucesso."
-                )
-                
-                logger.info(f"Ticket {ticket['id']} pausado por {user}")
-            else:
-                await interaction.followup.send(
-                    "❌ Erro ao pausar ticket."
-                )
+            await interaction.response.send_message(
+                "📋 **Pausar Ticket**\n\nSelecione o status do ticket:",
+                view=view,
+                ephemeral=True
+            )
             
         except Exception as e:
-            logger.error(f"Erro no comando ticket_pause: {e}")
-            await interaction.followup.send(
-                "❌ Erro ao pausar ticket."
+            logger.error(f"Erro no comando pause: {e}")
+            await interaction.response.send_message(
+                "❌ Erro ao pausar ticket.",
+                ephemeral=True
             )
     
     @discord.app_commands.command(name="ticket_unpause", description="Despausa o ticket atual (apenas administradores)")
