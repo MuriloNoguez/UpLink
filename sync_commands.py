@@ -108,7 +108,12 @@ async def main():
         print("⏱️  Processo será finalizado automaticamente após 30 segundos\n")
         
         # Executar bot
-        await bot.start(DISCORD_TOKEN)
+        try:
+            await bot.start(DISCORD_TOKEN)
+        finally:
+            # Garantir que o bot seja fechado adequadamente
+            if not bot.is_closed():
+                await bot.close()
         
     except KeyboardInterrupt:
         print("\n⏹️  Processo interrompido pelo usuário")

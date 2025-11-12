@@ -21,13 +21,10 @@ class KeepAliveSystem:
             "https://httpbin.org/get",  # Serviço público para teste de ping
             "https://api.github.com/zen",  # API do GitHub (leve)
         ]
-        self.session = None
     
     async def start(self):
         """Inicia o sistema de keep-alive."""
         try:
-            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
-            
             if not self.keep_alive_task.is_running():
                 self.keep_alive_task.start()
                 logger.info("🔄 Sistema Keep-Alive iniciado (ping a cada 30 minutos)")
@@ -41,9 +38,6 @@ class KeepAliveSystem:
             if self.keep_alive_task.is_running():
                 self.keep_alive_task.cancel()
             
-            if self.session and not self.session.closed:
-                await self.session.close()
-                
             logger.info("⏸️ Sistema Keep-Alive parado")
             
         except Exception as e:
@@ -52,9 +46,10 @@ class KeepAliveSystem:
     @tasks.loop(minutes=30)
     async def keep_alive_task(self):
         """Task que executa ping a cada 30 minutos."""
+        session = None
         try:
-            if not self.session or self.session.closed:
-                self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
+            # Criar sessão temporária para este ping
+            session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10))
             
             timestamp = datetime.now().strftime('%H:%M:%S')
             logger.info(f"🏓 Executando keep-alive ping às {timestamp}")
@@ -62,7 +57,7 @@ class KeepAliveSystem:
             # Fazer ping em uma das URLs
             for url in self.ping_urls:
                 try:
-                    async with self.session.get(url) as response:
+                    async with session.get(url) as response:
                         if response.status == 200:
                             logger.info(f"✅ Ping bem-sucedido para {url} (status: {response.status})")
                             break
@@ -82,6 +77,10 @@ class KeepAliveSystem:
             
         except Exception as e:
             logger.error(f"❌ Erro na task de keep-alive: {e}")
+        finally:
+            # Sempre fechar a sessão no final
+            if session and not session.closed:
+                await session.close()
     
     @keep_alive_task.before_loop
     async def before_keep_alive(self):
