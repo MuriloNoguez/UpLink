@@ -80,6 +80,9 @@ class OptimizedTicketBot(commands.Bot):
         # Keep-alive
         await setup_keep_alive(self)
         
+        # Servidor HTTP simples para o Render
+        self.start_http_server()
+        
         logger.info("✅ Bot configurado e pronto!")
     
     async def on_ready(self):
@@ -137,6 +140,38 @@ class OptimizedTicketBot(commands.Bot):
     async def before_auto_close(self):
         """Aguarda bot estar pronto."""
         await self.wait_until_ready()
+    
+    def start_http_server(self):
+        """Inicia servidor HTTP simples para o Render detectar porta."""
+        import threading
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        
+        class HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == '/' or self.path == '/health':
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    response = '{"status": "Bot online", "servers": ' + str(len(self.server.bot.guilds) if hasattr(self.server, 'bot') else 0) + '}'
+                    self.wfile.write(response.encode())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            
+            def log_message(self, format, *args):
+                # Suprimir logs HTTP desnecessários
+                pass
+        
+        port = int(os.environ.get('PORT', 10000))
+        server = HTTPServer(('0.0.0.0', port), HealthHandler)
+        server.bot = self  # Passar referência do bot
+        
+        def run_server():
+            logger.info(f"🌐 Servidor HTTP iniciado na porta {port}")
+            server.serve_forever()
+        
+        thread = threading.Thread(target=run_server, daemon=True)
+        thread.start()
 
 
 def main():
