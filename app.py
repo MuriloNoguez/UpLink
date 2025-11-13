@@ -9,6 +9,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
+from urllib import request, error
 
 import discord
 from discord.ext import commands, tasks
@@ -142,6 +143,7 @@ class OptimizedTicketBot(commands.Bot):
             return
         logger.info("Iniciando servidor HTTP de health-check para BlazeHosting...")
         self.start_health_server()
+        self._log_panel_endpoint_response()
 
     def start_health_server(self):
         """Inicia servidor HTTP para health check do BlazeHosting."""
@@ -288,6 +290,21 @@ class OptimizedTicketBot(commands.Bot):
         if 1 <= port <= 65535:
             return port
         return None
+    
+    def _log_panel_endpoint_response(self):
+        """Consulta o endpoint externo e loga o retorno para depuração."""
+        endpoint = os.environ.get("BLAZE_PANEL_ENDPOINT", "http://sd-br2.blazebr.com:26244/")
+        endpoint = endpoint.strip() or "http://sd-br2.blazebr.com:26244/"
+        if "://" not in endpoint:
+            endpoint = f"http://{endpoint}"
+        try:
+            with request.urlopen(endpoint, timeout=5) as resp:
+                body = resp.read(200).decode("utf-8", errors="replace").strip()
+                logger.info(f"Painel BlazeHosting respondeu {resp.status} para {endpoint}: {body or '<vazio>'}")
+        except error.URLError as e:
+            logger.warning(f"Não foi possível acessar {endpoint}: {e}")
+        except Exception as e:
+            logger.warning(f"Erro ao consultar {endpoint}: {e}")
 
     @staticmethod
     def _extract_port_from_address(value):
