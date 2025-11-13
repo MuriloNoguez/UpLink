@@ -6,6 +6,7 @@ Arquivo principal app.py para hospedagem.
 
 import sys
 import logging
+import os
 from datetime import datetime, timedelta
 
 import discord
@@ -41,42 +42,59 @@ class OptimizedTicketBot(commands.Bot):
         
     async def setup_hook(self):
         """Configuração do bot."""
-        # Banco de dados
-        self.db.init_database()
-        
-        # Comandos e views
-        await self.add_cog(TicketCommands(self))
-        await self.tree.sync()
-        
-        self.add_view(TicketView())
-        self.add_view(TicketControlView())
-        self.add_view(ReopenTicketView())
-        
-        # Task de fechamento automático
-        self.auto_close_tickets.start()
+        try:
+            logger.info("Iniciando configuração do bot...")
+            
+            # Banco de dados com timeout
+            logger.info("Conectando ao banco de dados...")
+            if not self.db.init_database():
+                logger.error("Falha na conexão com banco - continuando sem DB")
+            else:
+                logger.info("Banco conectado com sucesso")
+            
+            # Comandos e views
+            logger.info("Carregando comandos...")
+            await self.add_cog(TicketCommands(self))
+            
+            logger.info("Sincronizando comandos...")
+            try:
+                synced = await self.tree.sync()
+                logger.info(f"{len(synced)} comandos sincronizados")
+            except Exception as e:
+                logger.warning(f"Erro ao sincronizar comandos: {e}")
+            
+            logger.info("Adicionando views persistentes...")
+            self.add_view(TicketView())
+            self.add_view(TicketControlView())
+            self.add_view(ReopenTicketView())
+            
+            # Task de fechamento automático
+            logger.info("Iniciando task de fechamento...")
+            self.auto_close_tickets.start()
+            
+            # Servidor HTTP para health check do BlazeHosting
+            logger.info("Iniciando servidor HTTP...")
+            self.start_health_server()
+            
+            logger.info("Setup concluído com sucesso!")
+            
+        except Exception as e:
+            logger.error(f"Erro durante setup: {e}")
+            # Não fazer raise - deixar o bot continuar
     
     async def on_ready(self):
-        """Bot pronto - versão otimizada."""
-        startup_duration = (datetime.now() - self.startup_time).total_seconds()
-        
-        await self.change_presence(
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name="tickets de suporte"
-            )
-        )
-        
-        print(f"""
-🟢 BOT UPLINK ONLINE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🤖 Bot: {self.user}
-🌐 Servidores: {len(self.guilds)}
-⚡ Tempo de inicialização: {startup_duration:.1f}s
-✅ Status: Pronto para receber comandos
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💡 Use /setup_tickets para configurar canais
-💬 Use / no Discord para ver todos os comandos
-        """)
+        """Bot pronto."""
+        try:
+            startup_duration = (datetime.now() - self.startup_time).total_seconds()
+            
+            await self.change_presence(activity=discord.Activity(
+                type=discord.ActivityType.watching, name="tickets de suporte"))
+            
+            print(f"🟢 Bot {self.user} online em {len(self.guilds)} servidor(es) - {startup_duration:.1f}s")
+            logger.info(f"Bot {self.user} pronto após {startup_duration:.1f}s")
+            
+        except Exception as e:
+            logger.error(f"Erro em on_ready: {e}")
     
     async def close_ticket_channel(self, channel: discord.TextChannel, auto_close: bool = False):
         """Wrapper para compatibilidade."""
@@ -109,12 +127,60 @@ class OptimizedTicketBot(commands.Bot):
     @auto_close_tickets.before_loop
     async def before_auto_close(self):
         await self.wait_until_ready()
+    
+    def start_health_server(self):
+        """Inicia servidor HTTP para health check do BlazeHosting."""
+        import threading
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        import os
+        
+        class HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path in ['/', '/health', '/status']:
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    response = '{"status": "online", "bot": "UpLink"}'
+                    self.wfile.write(response.encode())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            
+            def log_message(self, format, *args):
+                # Suprimir logs HTTP desnecessários
+                pass
+        
+        # Usar porta do ambiente ou padrão 8000
+        port = int(os.environ.get('PORT', 8000))
+        
+        def run_server():
+            try:
+                server = HTTPServer(('0.0.0.0', port), HealthHandler)
+                logger.info(f"Servidor HTTP health check na porta {port}")
+                server.serve_forever()
+            except Exception as e:
+                logger.warning(f"Erro no servidor HTTP: {e}")
+        
+        # Executar em thread separada
+        thread = threading.Thread(target=run_server, daemon=True)
+        thread.start()
 
 
 def main():
-    validate_config()
-    bot = OptimizedTicketBot()
-    bot.run(DISCORD_TOKEN, log_handler=None)
+    try:
+        logger.info("Validando configuração...")
+        validate_config()
+        
+        logger.info("Criando instância do bot...")
+        bot = OptimizedTicketBot()
+        
+        logger.info("Iniciando bot...")
+        bot.run(DISCORD_TOKEN, log_handler=None)
+        
+    except Exception as e:
+        logger.error(f"Erro fatal: {e}")
+        import sys
+        sys.exit(1)
 
 
 if __name__ == "__main__":

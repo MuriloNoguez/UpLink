@@ -82,42 +82,36 @@ async def close_ticket_channel(bot, channel: discord.TextChannel, auto_close: bo
         # ENVIAR MENSAGEM PRIMEIRO, antes de alterar permissões
         await channel.send(embed=embed, view=reopen_view)
         
-        # Agora modificar permissões
-        guild = channel.guild
-        
-        # Buscar o dono do ticket
-        if ticket:
-            ticket_owner = guild.get_member(ticket['user_id'])
-            if ticket_owner:
-                try:
-                    await channel.set_permissions(
-                        ticket_owner, 
-                        send_messages=False,
-                        add_reactions=False,
-                        view_channel=True
-                    )
-                    await asyncio.sleep(0.3)  # Pequeno delay
-                except Exception as e:
-                    logger.warning(f"Erro ao alterar permissões do usuário: {e}")
-        
-        # Tornar somente leitura para @everyone
-        try:
-            await channel.set_permissions(
-                guild.default_role, 
-                send_messages=False,
-                add_reactions=False
-            )
-            await asyncio.sleep(0.3)
-        except Exception as e:
-            logger.warning(f"Erro ao alterar permissões gerais: {e}")
-        
-        # Renomear canal (por último)
-        if not channel.name.startswith("🔒"):
+        # Fazer alterações em background para evitar rate limiting
+        import asyncio
+        async def update_permissions_async():
             try:
-                new_name = f"🔒{channel.name}"
-                await channel.edit(name=new_name)
+                guild = channel.guild
+                
+                # Buscar o dono do ticket
+                if ticket:
+                    ticket_owner = guild.get_member(ticket['user_id'])
+                    if ticket_owner:
+                        await channel.set_permissions(
+                            ticket_owner, 
+                            send_messages=False,
+                            add_reactions=False,
+                            view_channel=True
+                        )
+                        await asyncio.sleep(1)  # Delay maior para evitar rate limit
+                
+                # Tornar somente leitura para @everyone
+                await channel.set_permissions(
+                    guild.default_role, 
+                    send_messages=False,
+                    add_reactions=False
+                )
+                    
             except Exception as e:
-                logger.warning(f"Erro ao renomear canal: {e}")
+                logger.warning(f"Erro ao atualizar permissões após fechamento: {e}")
+        
+        # Executar em background
+        asyncio.create_task(update_permissions_async())
         
         logger.info(f"Ticket {channel.id} fechado com sucesso")
         

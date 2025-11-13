@@ -39,10 +39,11 @@ class DatabaseManager:
             Conexão com PostgreSQL ou None em caso de erro
         """
         try:
-            # Usar a URL diretamente é mais simples com PostgreSQL
+            # Usar a URL diretamente com timeout
             connection = psycopg2.connect(
                 self.database_url,
-                cursor_factory=DictCursor
+                cursor_factory=DictCursor,
+                connect_timeout=10  # Timeout de 10 segundos
             )
             return connection
             

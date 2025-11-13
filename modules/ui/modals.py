@@ -116,30 +116,72 @@ class DescriptionModal(discord.ui.Modal):
                 existing_channel = guild.get_channel(latest_ticket['channel_id'])
                 
                 if existing_channel:
-                    # Reabrir o ticket existente
+                    # Reabrir o ticket existente no banco primeiro
                     ticket_id = interaction.client.db.reopen_ticket(
                         existing_channel.id,
                         self.reason,
                         self.description.value
                     )
                     is_reopened = True
+                    channel = existing_channel
                     logger.info(f"Reabrindo ticket existente para {user} no canal {existing_channel.name}")
                     
-                    # Restaurar permissões se necessário
-                    await existing_channel.set_permissions(
-                        user,
-                        read_messages=True,
-                        send_messages=True,
-                        attach_files=True,
-                        embed_links=True
+                    # Preparar e ENVIAR MENSAGEM PRIMEIRO (antes de qualquer alteração)
+                    embed_reopen = discord.Embed(
+                        title="🔄 Ticket Reaberto",
+                        description="Seu ticket foi reaberto com uma nova solicitação!",
+                        color=0xffa500,  # Laranja
+                        timestamp=datetime.now()
+                    )
+                    embed_reopen.add_field(
+                        name="👤 Usuário", value=user.mention, inline=True
+                    )
+                    embed_reopen.add_field(
+                        name="🏷️ Motivo", value=self.reason, inline=True
+                    )
+                    embed_reopen.add_field(
+                        name="📅 Data", value=f"`{datetime.now().strftime('%d/%m/%Y %H:%M')}`", inline=True
+                    )
+                    embed_reopen.add_field(
+                        name="📝 Nova Descrição:", value=self.description.value, inline=False
+                    )
+                    embed_reopen.add_field(
+                        name="📜 Histórico Preservado",
+                        value="Todo o histórico anterior foi mantido. Scroll para cima para ver conversas anteriores.",
+                        inline=False
                     )
                     
-                    # Remover emoji de fechado se existir
-                    new_name = existing_channel.name.replace("🔒", "").replace("⏸️", "")
-                    if existing_channel.name != new_name:
-                        await existing_channel.edit(name=new_name)
-                        
-                    channel = existing_channel
+                    # Importar view de controle
+                    from .views import TicketControlView
+                    control_view = TicketControlView()
+                    
+                    # ENVIAR MENSAGEM IMEDIATAMENTE
+                    await channel.send(
+                        content=f"🔔 **{user.mention}, seu ticket foi reaberto!**\n"
+                               f"📞 <@&1382008028517109832> responderá em breve.",
+                        embed=embed_reopen,
+                        view=control_view
+                    )
+                    
+                    # Agora fazer alterações (em background, sem bloquear)
+                    import asyncio
+                    async def update_channel_async():
+                        try:
+                            # Restaurar permissões
+                            await channel.set_permissions(
+                                user, send_messages=True, add_reactions=True, view_channel=True
+                            )
+                        except Exception as e:
+                            logger.warning(f"Erro ao atualizar canal após reabertura: {e}")
+                    
+                    # Executar em background
+                    asyncio.create_task(update_channel_async())
+                    
+                    # Pular a criação normal do embed (já foi enviado)
+                    skip_normal_embed = True
+            
+            # Variável para controlar se deve pular embed normal
+            skip_normal_embed = False
             
             if not existing_channel:
                 # Criar novo canal se não existe um canal anterior
@@ -270,16 +312,18 @@ class DescriptionModal(discord.ui.Modal):
                     text="Este ticket será fechado automaticamente em 12 horas se não houver atividade."
                 )
             
-            # View com botões de controle para administradores
-            control_view = TicketControlView()
-            
-            # Enviar mensagem no canal do ticket
-            await channel.send(
-                content=f"🔔 **{user.mention}, seu ticket foi {'reaberto' if is_reopened else 'criado'}!**\n"
-                       f"� <@&1382008028517109832> responderá em breve.",
-                embed=embed,
-                view=control_view
-            )
+            # Enviar mensagem apenas para tickets NOVOS (reabertura já foi enviada acima)
+            if not skip_normal_embed:
+                # View com botões de controle para administradores
+                control_view = TicketControlView()
+                
+                # Enviar mensagem no canal do ticket
+                await channel.send(
+                    content=f"🔔 **{user.mention}, seu ticket foi {'reaberto' if is_reopened else 'criado'}!**\n"
+                           f"📞 <@&1382008028517109832> responderá em breve.",
+                    embed=embed,
+                    view=control_view
+                )
             
             # Responder ao usuário
             if is_reopened:
