@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-🚀 Bot UpLink - Versão Otimizada para Produção
-Sem sincronização automática para builds mais rápidos no Render.
+🚀 Bot UpLink - Versão Otimizada para BlazeHosting
+Arquivo principal app.py para hospedagem.
 """
 
 import os
@@ -43,7 +43,7 @@ intents.guilds = True
 
 
 class OptimizedTicketBot(commands.Bot):
-    """Bot otimizado para produção no Render."""
+    """Bot otimizado para produção no BlazeHosting."""
     
     def __init__(self):
         super().__init__(
@@ -88,7 +88,7 @@ class OptimizedTicketBot(commands.Bot):
         # Keep-alive
         await setup_keep_alive(self)
         
-        # Servidor HTTP simples para o Render
+        # Servidor HTTP simples para o BlazeHosting
         self.start_http_server()
         
         logger.info("✅ Bot configurado e pronto!")
@@ -150,7 +150,7 @@ class OptimizedTicketBot(commands.Bot):
         await self.wait_until_ready()
     
     def start_http_server(self):
-        """Inicia servidor HTTP simples para o Render detectar porta."""
+        """Inicia servidor HTTP simples para o BlazeHosting detectar porta."""
         import threading
         from http.server import HTTPServer, BaseHTTPRequestHandler
         
