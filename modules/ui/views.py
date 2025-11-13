@@ -9,6 +9,7 @@ from datetime import datetime
 import discord
 
 from config import EMBED_COLORS, BOT_CONFIG
+from utils.helpers import schedule_ephemeral_deletion
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class TicketView(discord.ui.View):
                         f"💡 **Dica:** Você pode usar o mesmo canal para novos problemas!",
                         ephemeral=True
                     )
+                    schedule_ephemeral_deletion(interaction)
                     return
             
             # Remover verificação de tickets pausados - permitir reabertura direta
@@ -58,13 +60,22 @@ class TicketView(discord.ui.View):
                 view=view,
                 ephemeral=True
             )
+            schedule_ephemeral_deletion(interaction)
             
         except Exception as e:
             logger.error(f"Erro ao abrir ticket: {e}")
-            await interaction.response.send_message(
-                "❌ Erro interno. Tente novamente.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Erro interno. Tente novamente.",
+                    ephemeral=True
+                )
+                schedule_ephemeral_deletion(interaction)
+            else:
+                message = await interaction.followup.send(
+                    "❌ Erro interno. Tente novamente.",
+                    ephemeral=True
+                )
+                schedule_ephemeral_deletion(interaction, message)
 
 
 class TicketControlView(discord.ui.View):
@@ -100,6 +111,7 @@ class ReopenTicketView(discord.ui.View):
                     "❌ Este não é um canal de ticket válido.",
                     ephemeral=True
                 )
+                schedule_ephemeral_deletion(interaction)
                 return
                 
             if ticket['status'] != 'closed':
@@ -107,6 +119,7 @@ class ReopenTicketView(discord.ui.View):
                     f"❌ Este ticket não está fechado. Status atual: {ticket['status']}",
                     ephemeral=True
                 )
+                schedule_ephemeral_deletion(interaction)
                 return
             
             # Verificar se é o dono do ticket
@@ -116,6 +129,7 @@ class ReopenTicketView(discord.ui.View):
                     "❌ Apenas o dono do ticket pode reabri-lo.",
                     ephemeral=True
                 )
+                schedule_ephemeral_deletion(interaction)
                 return
             
             # Abrir seleção de motivo
@@ -127,11 +141,20 @@ class ReopenTicketView(discord.ui.View):
                 view=view,
                 ephemeral=True
             )
+            schedule_ephemeral_deletion(interaction)
             
         except Exception as e:
             logger.error(f"Erro ao reabrir ticket via botão: {e}")
-            await interaction.response.send_message(
-                "❌ Erro interno ao reabrir ticket.",
-                ephemeral=True
-            )
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Erro interno ao reabrir ticket.",
+                    ephemeral=True
+                )
+                schedule_ephemeral_deletion(interaction)
+            else:
+                message = await interaction.followup.send(
+                    "❌ Erro interno ao reabrir ticket.",
+                    ephemeral=True
+                )
+                schedule_ephemeral_deletion(interaction, message)
 

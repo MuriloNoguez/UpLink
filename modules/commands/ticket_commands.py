@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from config import EMBED_COLORS, BOT_CONFIG, STATUS_EMOJI
 from modules.ui.views import TicketView
+from utils.helpers import schedule_ephemeral_deletion
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,7 @@ class TicketCommands(commands.Cog):
                 view=view,
                 ephemeral=True
             )
+            schedule_ephemeral_deletion(interaction)
             
         except Exception as e:
             logger.error(f"Erro no comando close: {e}")
@@ -267,6 +269,7 @@ class TicketCommands(commands.Cog):
                 "❌ Erro ao fechar ticket.",
                 ephemeral=True
             )
+            schedule_ephemeral_deletion(interaction)
     
     @discord.app_commands.command(name="ticket_unpause", description="Despausa o ticket atual (apenas administradores)")
     async def ticket_unpause(self, interaction: discord.Interaction):

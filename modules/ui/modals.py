@@ -4,15 +4,50 @@ Modais para interação com o usuário no sistema de tickets.
 
 import logging
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime
+from typing import List, Optional
 
 import discord
 
 from config import TICKET_REASONS, BOT_CONFIG
 from .views import TicketControlView
-from utils.helpers import resolve_emoji
+from utils.helpers import resolve_emoji, schedule_ephemeral_deletion
 
 logger = logging.getLogger(__name__)
+
+# Mapeamento entre permissões do Discord e o nome legível que repassamos ao usuário.
+REQUIRED_TICKET_PERMISSIONS = {
+    "manage_channels": "Manage Channels",
+    "send_messages": "Send Messages",
+    "embed_links": "Embed Links",
+    "attach_files": "Attach Files",
+}
+
+
+def _build_reason_options(bot: Optional[discord.Client], guild: Optional[discord.Guild]) -> List[discord.SelectOption]:
+    """Cria a lista de opções do select a partir das razões configuradas."""
+    options: List[discord.SelectOption] = []
+    for reason in TICKET_REASONS:
+        emoji = resolve_emoji(bot, reason["emoji"], guild) if bot and guild else reason["emoji"]
+        options.append(
+            discord.SelectOption(
+                label=reason["label"],
+                description=reason["description"],
+                emoji=emoji,
+            )
+        )
+    return options
+
+
+@dataclass
+class TicketChannelContext:
+    """Representa o resultado da preparação do canal de ticket."""
+
+    channel: discord.TextChannel
+    ticket_id: Optional[int]
+    is_reopened: bool = False
+    skip_intro_embed: bool = False
 
 
 class ReasonSelect(discord.ui.Select):
@@ -22,20 +57,9 @@ class ReasonSelect(discord.ui.Select):
         self.bot = bot
         self.guild = guild
         
-        options = []
-        for reason in TICKET_REASONS:
-            # Resolver emoji dinamicamente
-            emoji = resolve_emoji(bot, reason['emoji'], guild) if bot and guild else reason['emoji']
-            
-            options.append(discord.SelectOption(
-                label=reason['label'],
-                description=reason['description'],
-                emoji=emoji
-            ))
-        
         super().__init__(
             placeholder="Selecione o motivo do seu chamado...",
-            options=options,
+            options=_build_reason_options(bot, guild),
             custom_id="ticket_reason_select"
         )
     
@@ -48,10 +72,11 @@ class ReasonSelect(discord.ui.Select):
             
         except Exception as e:
             logger.error(f"Erro no callback do select: {e}")
-            await interaction.followup.send(
+            message = await interaction.followup.send(
                 "❌ Ocorreu um erro. Tente novamente.",
                 ephemeral=True
             )
+            schedule_ephemeral_deletion(interaction, message)
 
 
 class DescriptionModal(discord.ui.Modal):
@@ -74,317 +99,361 @@ class DescriptionModal(discord.ui.Modal):
         """Callback executado quando o modal é enviado."""
         try:
             await interaction.response.defer(ephemeral=True)
-            
             guild = interaction.guild
             user = interaction.user
-            
-            # Checar permissões do bot no servidor antes de operações que podem falhar com 403
-            try:
-                bot_member = guild.me
-                bot_perms = bot_member.guild_permissions if bot_member else None
-            except Exception:
-                bot_perms = None
 
-            missing_perms = []
-            if not bot_perms or not bot_perms.manage_channels:
-                missing_perms.append('Manage Channels')
-            if not bot_perms or not bot_perms.send_messages:
-                missing_perms.append('Send Messages')
-            if not bot_perms or not bot_perms.embed_links:
-                missing_perms.append('Embed Links')
-            if not bot_perms or not bot_perms.attach_files:
-                missing_perms.append('Attach Files')
-
-            if missing_perms:
-                # Informar o usuário e abortar a criação do ticket de forma amigável
-                perms_list = ', '.join(missing_perms)
-                logger.error(f"Bot sem permissões necessárias no servidor {guild.name}: {perms_list}")
+            if not guild:
                 await interaction.followup.send(
-                    f"❌ O bot não possui permissões necessárias neste servidor: {perms_list}. Peça a um administrador para conceder essas permissões ao cargo do bot e tente novamente.",
-                    ephemeral=True
+                    "❌ Este recurso só pode ser usado dentro de um servidor.",
+                    ephemeral=True,
                 )
                 return
-            
-            # Verificar se já existe um ticket/canal para este usuário
-            latest_ticket = interaction.client.db.get_user_latest_ticket(user.id)
-            existing_channel = None
-            ticket_id = None
-            is_reopened = False
-            # Controla se devemos pular o embed padrão (quando já enviamos a mensagem de reabertura)
-            skip_normal_embed = False
-            
-            if latest_ticket:
-                # Buscar o canal existente
-                existing_channel = guild.get_channel(latest_ticket['channel_id'])
-                
-                if existing_channel:
-                    # Reabrir o ticket existente no banco primeiro
-                    ticket_id = interaction.client.db.reopen_ticket(
-                        existing_channel.id,
-                        self.reason,
-                        self.description.value
-                    )
-                    is_reopened = True
-                    channel = existing_channel
-                    logger.info(f"Reabrindo ticket existente para {user} no canal {existing_channel.name}")
-                    
-                    # Preparar e ENVIAR MENSAGEM PRIMEIRO (antes de qualquer alteração)
-                    embed_reopen = discord.Embed(
-                        title="🔄 Ticket Reaberto",
-                        description="Seu ticket foi reaberto com uma nova solicitação!",
-                        color=0xffa500,  # Laranja
-                        timestamp=datetime.now()
-                    )
-                    embed_reopen.add_field(
-                        name="👤 Usuário", value=user.mention, inline=True
-                    )
-                    embed_reopen.add_field(
-                        name="🏷️ Motivo", value=self.reason, inline=True
-                    )
-                    embed_reopen.add_field(
-                        name="📅 Data", value=f"`{datetime.now().strftime('%d/%m/%Y %H:%M')}`", inline=True
-                    )
-                    embed_reopen.add_field(
-                        name="📝 Nova Descrição:", value=self.description.value, inline=False
-                    )
-                    embed_reopen.add_field(
-                        name="📜 Histórico Preservado",
-                        value="Todo o histórico anterior foi mantido. Scroll para cima para ver conversas anteriores.",
-                        inline=False
-                    )
-                    
-                    # Usar view de controle (import no topo do módulo evita sombreamento de nome)
-                    control_view = TicketControlView()
-                    
-                    # ENVIAR MENSAGEM IMEDIATAMENTE
-                    await channel.send(
-                        content=f"🔔 **{user.mention}, seu ticket foi reaberto!**\n"
-                               f"📞 <@&1382008028517109832> responderá em breve.",
-                        embed=embed_reopen,
-                        view=control_view
-                    )
-                    
-                    # Agora fazer alterações (em background, sem bloquear)
-                    import asyncio
-                    async def update_channel_async():
-                        try:
-                            # Restaurar permissões
-                            await channel.set_permissions(
-                                user, send_messages=True, add_reactions=True, view_channel=True
-                            )
-                        except Exception as e:
-                            logger.warning(f"Erro ao atualizar canal após reabertura: {e}")
-                    
-                    # Executar em background
-                    asyncio.create_task(update_channel_async())
-                    
-                    # Pular a criação normal do embed (já foi enviado)
-                    skip_normal_embed = True
-            
-            # Nota: `skip_normal_embed` já foi inicializada acima
-            
-            if not existing_channel:
-                # Criar novo canal se não existe um canal anterior
-                # Buscar ou criar categoria "Tickets"
-                category = discord.utils.get(guild.categories, name=BOT_CONFIG['tickets_category_name'])
-                if not category:
-                    category = await guild.create_category(
-                        name=BOT_CONFIG['tickets_category_name'],
-                        reason="Categoria criada automaticamente pelo bot de tickets"
-                    )
-                    logger.info(f"Categoria '{BOT_CONFIG['tickets_category_name']}' criada no servidor {guild.name}")
-                
-                # Configurar permissões do canal (apenas administradores e dono do ticket)
-                overwrites = {
-                    guild.default_role: discord.PermissionOverwrite(read_messages=False),
-                    user: discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=True,
-                        attach_files=True,
-                        embed_links=True
-                    ),
-                    guild.me: discord.PermissionOverwrite(
-                        read_messages=True,
-                        send_messages=True,
-                        manage_messages=True,
-                        embed_links=True
-                    )
-                }
-                
-                # Adicionar permissões para todos os administradores do servidor
-                for member in guild.members:
-                    if member.guild_permissions.administrator and not member.bot:
-                        overwrites[member] = discord.PermissionOverwrite(
-                            read_messages=True,
-                            send_messages=True,
-                            manage_messages=True,
-                            embed_links=True
-                        )
-                
-                # Criar canal do ticket
-                channel_name = f"💻┃{user.name.lower()}"
-                channel = await category.create_text_channel(
-                    name=channel_name,
-                    overwrites=overwrites,
-                    reason=f"Ticket criado por {user}"
-                )
-                
-                # Salvar no banco de dados
-                ticket_id = interaction.client.db.create_ticket(
-                    user_id=user.id,
-                    user_name=str(user),
-                    channel_id=channel.id,
-                    reason=self.reason,
-                    description=self.description.value
-                )
-            
-            if not ticket_id:
-                if not is_reopened and channel:
-                    await channel.delete(reason="Erro ao criar ticket no banco")
-                await interaction.followup.send(
-                    "❌ Erro ao criar ticket. Tente novamente.",
-                    ephemeral=True
-                )
+
+            missing_permissions = self._collect_missing_permissions(guild)
+            if missing_permissions:
+                await self._notify_missing_permissions(interaction, guild, missing_permissions)
                 return
-            
-            # Embed de informações do ticket
-            if is_reopened:
-                embed = discord.Embed(
-                    title="🔄 Ticket Reaberto",
-                    description="Seu ticket foi reaberto com uma nova solicitação!",
-                    color=0xffa500,  # Laranja
-                    timestamp=datetime.now()
-                )
-                embed.add_field(
-                    name="📜 Histórico Preservado",
-                    value="Este é seu canal de ticket pessoal. Todo o histórico anterior foi mantido.",
-                    inline=False
-                )
-            else:
-                embed = discord.Embed(
-                    title="🎫 Novo Ticket de Suporte",
-                    description="Seu ticket foi criado com sucesso!",
-                    color=0x00ff00,  # Verde
-                    timestamp=datetime.now()
-                )
-            
-            embed.add_field(
-                name="👤 Usuário",
-                value=user.mention,
-                inline=True
-            )
-            
-            embed.add_field(
-                name="🏷️ Motivo",
-                value=self.reason,
-                inline=True
-            )
-            
-            embed.add_field(
-                name="📅 Data",
-                value=f"`{datetime.now().strftime('%d/%m/%Y %H:%M')}`",
-                inline=True
-            )
-            
-            embed.add_field(
-                name="📝 Descrição:",
-                value=self.description.value,
-                inline=False
-            )
-            
-            embed.add_field(
-                name="📎 Anexos e Arquivos",
-                value="💡 Adicione anexos abaixo para ajudar na resolução do problema, links, fotos...",
-                inline=False
-            )
-            
-            if is_reopened:
-                embed.add_field(
-                    name="⚠️ Importante",
-                    value="Este ticket foi reaberto. Scroll para cima para ver conversas anteriores.",
-                    inline=False
-                )
-                embed.set_footer(
-                    text="Este é seu canal pessoal de ticket. Será fechado automaticamente em 12 horas se não houver atividade."
-                )
-            else:
-                embed.set_footer(
-                    text="Este ticket será fechado automaticamente em 12 horas se não houver atividade."
-                )
-            
-            # Enviar mensagem apenas para tickets NOVOS (reabertura já foi enviada acima)
-            if not skip_normal_embed:
-                # View com botões de controle para administradores
+
+            context = await self._prepare_channel(interaction, guild, user)
+            if not context or not context.ticket_id:
+                if context and not context.is_reopened:
+                    await context.channel.delete(reason="Erro ao criar ticket no banco")
+                await self._notify_creation_failure(interaction)
+                return
+
+            if not context.skip_intro_embed:
                 control_view = TicketControlView()
-                
-                # Enviar mensagem no canal do ticket
-                await channel.send(
-                    content=f"🔔 **{user.mention}, seu ticket foi {'reaberto' if is_reopened else 'criado'}!**\n"
-                           f"📞 <@&1382008028517109832> responderá em breve.",
+                embed = self._build_ticket_embed(user, self.description.value, context.is_reopened)
+                await context.channel.send(
+                    content=self._build_ticket_opening_content(user, context.is_reopened),
                     embed=embed,
-                    view=control_view
+                    view=control_view,
                 )
-            
-            # Responder ao usuário
-            if is_reopened:
-                embed_response = discord.Embed(
-                    title="🔄 Ticket Reaberto com Sucesso!",
-                    description=f"Seu ticket foi reaberto no canal {channel.mention}",
-                    color=0xffa500  # Laranja
-                )
-                embed_response.add_field(
-                    name="📜 Histórico Mantido:",
-                    value="Todas as conversas anteriores foram preservadas no canal.",
-                    inline=False
-                )
-            else:
-                embed_response = discord.Embed(
-                    title="🎫 Ticket Criado com Sucesso!",
-                    description=f"Seu ticket foi criado no canal {channel.mention}",
-                    color=0x00ff00  # Verde
-                )
-            
-            embed_response.add_field(
-                name="📍 Próximo passo:",
-                value=f"**[Clique aqui para acessar seu ticket](<https://discord.com/channels/{channel.guild.id}/{channel.id}>)**",
-                inline=False
+
+            await self._send_ephemeral_confirmation(interaction, context.channel, context.is_reopened)
+            self._log_ticket_creation(context, user)
+
+        except Exception as exc:
+            await self._handle_creation_error(interaction, exc)
+
+    def _collect_missing_permissions(self, guild: discord.Guild) -> List[str]:
+        """Retorna a lista de permissões faltantes para o bot."""
+        try:
+            bot_member = guild.me
+            bot_perms = bot_member.guild_permissions if bot_member else None
+        except Exception:
+            bot_perms = None
+
+        missing: List[str] = []
+        for attr, label in REQUIRED_TICKET_PERMISSIONS.items():
+            if not bot_perms or not getattr(bot_perms, attr, False):
+                missing.append(label)
+        return missing
+
+    async def _notify_missing_permissions(
+        self,
+        interaction: discord.Interaction,
+        guild: discord.Guild,
+        missing: List[str],
+    ) -> None:
+        perms_list = ", ".join(missing)
+        logger.error("Bot sem permissões necessárias no servidor %s: %s", guild.name, perms_list)
+        message = await interaction.followup.send(
+            f"❌ O bot não possui permissões necessárias neste servidor: {perms_list}. "
+            "Peça a um administrador para conceder essas permissões ao cargo do bot e tente novamente.",
+            ephemeral=True,
+        )
+        schedule_ephemeral_deletion(interaction, message)
+
+    async def _prepare_channel(
+        self,
+        interaction: discord.Interaction,
+        guild: discord.Guild,
+        user: discord.Member,
+    ) -> Optional[TicketChannelContext]:
+        """Decide se o ticket deve ser reaberto ou criado e retorna o contexto do canal."""
+        latest_ticket = interaction.client.db.get_user_latest_ticket(user.id)
+        if latest_ticket:
+            channel = guild.get_channel(latest_ticket["channel_id"])
+            if channel:
+                return await self._reopen_existing_ticket(interaction, user, channel)
+
+        return await self._create_channel_with_ticket(interaction, guild, user)
+
+    async def _reopen_existing_ticket(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        channel: discord.TextChannel,
+    ) -> Optional[TicketChannelContext]:
+        """Reabre um ticket existente e envia a mensagem informativa."""
+        ticket_id = interaction.client.db.reopen_ticket(
+            channel.id,
+            self.reason,
+            self.description.value,
+        )
+        if not ticket_id:
+            return None
+
+        logger.info("Reabrindo ticket existente para %s no canal %s", user, channel.name)
+        embed = self._build_reopen_embed(user)
+        control_view = TicketControlView()
+
+        await channel.send(
+            content=self._build_ticket_opening_content(user, True),
+            embed=embed,
+            view=control_view,
+        )
+        self._restore_user_permissions(channel, user)
+
+        return TicketChannelContext(
+            channel=channel,
+            ticket_id=ticket_id,
+            is_reopened=True,
+            skip_intro_embed=True,
+        )
+
+    async def _create_channel_with_ticket(
+        self,
+        interaction: discord.Interaction,
+        guild: discord.Guild,
+        user: discord.Member,
+    ) -> Optional[TicketChannelContext]:
+        """Cria um novo canal de ticket e registra no banco."""
+        category = discord.utils.get(guild.categories, name=BOT_CONFIG["tickets_category_name"])
+        if not category:
+            category = await guild.create_category(
+                name=BOT_CONFIG["tickets_category_name"],
+                reason="Categoria criada automaticamente pelo bot de tickets",
             )
-            embed_response.add_field(
-                name="💡 Dica:",
-                value="Você também pode acessar através da lista de canais na lateral esquerda",
-                inline=False
+            logger.info(
+                "Categoria '%s' criada no servidor %s",
+                BOT_CONFIG["tickets_category_name"],
+                guild.name,
             )
-            
-            message = await interaction.followup.send(
-                embed=embed_response,
-                ephemeral=True
+
+        overwrites = self._build_channel_overwrites(guild, user)
+        channel_name = f"💻┃{user.name.lower()}"
+        channel = await category.create_text_channel(
+            name=channel_name,
+            overwrites=overwrites,
+            reason=f"Ticket criado por {user}",
+        )
+
+        ticket_id = interaction.client.db.create_ticket(
+            user_id=user.id,
+            user_name=str(user),
+            channel_id=channel.id,
+            reason=self.reason,
+            description=self.description.value,
+        )
+
+        return TicketChannelContext(channel=channel, ticket_id=ticket_id)
+
+    def _build_channel_overwrites(
+        self,
+        guild: discord.Guild,
+        user: discord.Member,
+    ) -> dict:
+        """Monta as permissões padrão do canal do ticket."""
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            user: discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True,
+                attach_files=True,
+                embed_links=True,
+            ),
+        }
+
+        if guild.me:
+            overwrites[guild.me] = discord.PermissionOverwrite(
+                read_messages=True,
+                send_messages=True,
+                manage_messages=True,
+                embed_links=True,
             )
-            
-            # Agendar exclusão da mensagem após 45 segundos
-            import asyncio
-            async def delete_after_delay():
-                try:
-                    await asyncio.sleep(45)
-                    await message.delete()
-                except Exception:
-                    pass  # Ignorar erros se a mensagem já foi deletada
-            
-            asyncio.create_task(delete_after_delay())
-            
-            logger.info(f"Ticket {ticket_id} {'reaberto' if is_reopened else 'criado'} por {user} no canal {channel.name}")
-            
-        except Exception as e:
-            logger.error(f"Erro ao criar ticket: {e}")
-            # If sending the modal failed, try to reply safely. If no response was sent yet
-            # we must use interaction.response.send_message, otherwise followup is allowed.
+
+        for member in guild.members:
+            if member.guild_permissions.administrator and not member.bot:
+                overwrites[member] = discord.PermissionOverwrite(
+                    read_messages=True,
+                    send_messages=True,
+                    manage_messages=True,
+                    embed_links=True,
+                )
+
+        return overwrites
+
+    def _build_reopen_embed(self, user: discord.Member) -> discord.Embed:
+        """Cria o embed específico para reaberturas."""
+        embed = discord.Embed(
+            title="🔄 Ticket Reaberto",
+            description="Seu ticket foi reaberto com uma nova solicitação!",
+            color=0xFFA500,
+            timestamp=datetime.now(),
+        )
+        embed.add_field(name="👤 Usuário", value=user.mention, inline=True)
+        embed.add_field(name="🏷️ Motivo", value=self.reason, inline=True)
+        embed.add_field(
+            name="📅 Data",
+            value=f"`{datetime.now().strftime('%d/%m/%Y %H:%M')}`",
+            inline=True,
+        )
+        embed.add_field(name="📝 Nova Descrição:", value=self.description.value, inline=False)
+        embed.add_field(
+            name="📜 Histórico Preservado",
+            value="Todo o histórico anterior foi mantido. Scroll para cima para ver conversas anteriores.",
+            inline=False,
+        )
+        return embed
+
+    @staticmethod
+    def _restore_user_permissions(channel: discord.TextChannel, user: discord.Member) -> None:
+        """Restaura permissões de envio para o usuário após reabrir o ticket."""
+
+        async def update_channel_async():
             try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ Ocorreu um erro. Tente novamente.", ephemeral=True)
-                else:
-                    await interaction.followup.send("❌ Ocorreu um erro. Tente novamente.", ephemeral=True)
-            except Exception:
-                # Last resort: log the failure. Avoid raising further to keep bot stable.
-                logger.exception("Falha ao notificar usuário sobre erro no select")
+                await channel.set_permissions(
+                    user,
+                    send_messages=True,
+                    add_reactions=True,
+                    view_channel=True,
+                )
+            except Exception as exc:
+                logger.warning("Erro ao atualizar canal após reabertura: %s", exc)
+
+        asyncio.create_task(update_channel_async())
+
+    def _build_ticket_embed(
+        self,
+        user: discord.Member,
+        description: str,
+        is_reopened: bool,
+    ) -> discord.Embed:
+        """Gera o embed padrão com as informações do ticket."""
+        if is_reopened:
+            embed = discord.Embed(
+                title="🔄 Ticket Reaberto",
+                description="Seu ticket foi reaberto com uma nova solicitação!",
+                color=0xFFA500,
+                timestamp=datetime.now(),
+            )
+            embed.add_field(
+                name="📜 Histórico Preservado",
+                value="Este é seu canal de ticket pessoal. Todo o histórico anterior foi mantido.",
+                inline=False,
+            )
+        else:
+            embed = discord.Embed(
+                title="🎫 Novo Ticket de Suporte",
+                description="Seu ticket foi criado com sucesso!",
+                color=0x00FF00,
+                timestamp=datetime.now(),
+            )
+
+        embed.add_field(name="👤 Usuário", value=user.mention, inline=True)
+        embed.add_field(name="🏷️ Motivo", value=self.reason, inline=True)
+        embed.add_field(
+            name="📅 Data",
+            value=f"`{datetime.now().strftime('%d/%m/%Y %H:%M')}`",
+            inline=True,
+        )
+        embed.add_field(name="📝 Descrição:", value=description, inline=False)
+        embed.add_field(
+            name="📎 Anexos e Arquivos",
+            value="💡 Adicione anexos abaixo para ajudar na resolução do problema, links, fotos...",
+            inline=False,
+        )
+        if is_reopened:
+            embed.add_field(
+                name="⚠️ Importante",
+                value="Este ticket foi reaberto. Scroll para cima para ver conversas anteriores.",
+                inline=False,
+            )
+            embed.set_footer(
+                text="Este é seu canal pessoal de ticket. Será fechado automaticamente em 12 horas se não houver atividade.",
+            )
+        else:
+            embed.set_footer(
+                text="Este ticket será fechado automaticamente em 12 horas se não houver atividade.",
+            )
+        return embed
+
+    @staticmethod
+    def _build_ticket_opening_content(user: discord.Member, is_reopened: bool) -> str:
+        """Mensagem textual enviada junto do embed no canal do ticket."""
+        action = "reaberto" if is_reopened else "criado"
+        return (
+            f"🔔 **{user.mention}, seu ticket foi {action}!**\n"
+            "📞 <@&1382008028517109832> responderá em breve."
+        )
+
+    async def _send_ephemeral_confirmation(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        is_reopened: bool,
+    ) -> None:
+        """Responde ao usuário em DM com o link do ticket."""
+        embed = self._build_ephemeral_embed(channel, is_reopened)
+        message = await interaction.followup.send(embed=embed, ephemeral=True)
+        schedule_ephemeral_deletion(interaction, message, delay=120)
+
+    def _build_ephemeral_embed(self, channel: discord.TextChannel, is_reopened: bool) -> discord.Embed:
+        """Cria o embed de confirmação usado nas respostas ephemerals."""
+        if is_reopened:
+            embed = discord.Embed(
+                title="🔄 Ticket Reaberto com Sucesso!",
+                description=f"Seu ticket foi reaberto no canal {channel.mention}",
+                color=0xFFA500,
+            )
+            embed.add_field(
+                name="📜 Histórico Mantido:",
+                value="Todas as conversas anteriores foram preservadas no canal.",
+                inline=False,
+            )
+        else:
+            embed = discord.Embed(
+                title="🎫 Ticket Criado com Sucesso!",
+                description=f"Seu ticket foi criado no canal {channel.mention}",
+                color=0x00FF00,
+            )
+
+        embed.add_field(
+            name="📍 Próximo passo:",
+            value=f"**[Clique aqui para acessar seu ticket](<https://discord.com/channels/{channel.guild.id}/{channel.id}>)**",
+            inline=False,
+        )
+        embed.add_field(
+            name="💡 Dica:",
+            value="Você também pode acessar através da lista de canais na lateral esquerda",
+            inline=False,
+        )
+        return embed
+
+    async def _notify_creation_failure(self, interaction: discord.Interaction) -> None:
+        """Envia uma mensagem amigável quando não foi possível criar o ticket."""
+        message = await interaction.followup.send("❌ Erro ao criar ticket. Tente novamente.", ephemeral=True)
+        schedule_ephemeral_deletion(interaction, message)
+
+    def _log_ticket_creation(self, context: TicketChannelContext, user: discord.Member) -> None:
+        """Registra no log o resultado da criação do ticket."""
+        action = "reaberto" if context.is_reopened else "criado"
+        logger.info("Ticket %s %s por %s no canal %s", context.ticket_id, action, user, context.channel.name)
+
+    async def _handle_creation_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        """Garante que o usuário seja notificado caso algo falhe inesperadamente."""
+        logger.error("Erro ao criar ticket: %s", error)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Ocorreu um erro. Tente novamente.", ephemeral=True)
+                schedule_ephemeral_deletion(interaction)
+            else:
+                message = await interaction.followup.send("❌ Ocorreu um erro. Tente novamente.", ephemeral=True)
+                schedule_ephemeral_deletion(interaction, message)
+        except Exception:
+            logger.exception("Falha ao notificar usuário sobre erro no select")
 
 
 class ReasonSelectView(discord.ui.View):
@@ -443,10 +512,11 @@ class CloseStatusSelect(discord.ui.Select):
             
         except Exception as e:
             logger.error(f"Erro no callback do pause select: {e}")
-            await interaction.followup.send(
+            message = await interaction.followup.send(
                 "❌ Ocorreu um erro. Tente novamente.",
                 ephemeral=True
             )
+            schedule_ephemeral_deletion(interaction, message)
 
 
 class PauseDescriptionModal(discord.ui.Modal):
@@ -553,10 +623,11 @@ class PauseDescriptionModal(discord.ui.Modal):
             logger.info(f"Ticket {self.ticket['id']} fechado por {user} com status: {self.status}")
             
             # Confirmar para o usuário que o status foi definido
-            await interaction.followup.send(
+            message = await interaction.followup.send(
                 f"✅ Ticket fechado com status: **{config['title']}**",
                 ephemeral=True
             )
+            schedule_ephemeral_deletion(interaction, message)
             
         except Exception as e:
             logger.error(f"Erro ao fechar ticket: {e}")

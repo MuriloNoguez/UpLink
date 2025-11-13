@@ -18,8 +18,9 @@ from modules.ui.views import TicketView, TicketControlView, ReopenTicketView
 from modules.commands.ticket_commands import TicketCommands
 from utils.helpers import close_ticket_channel
 
-# Configuração simples de logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# Configuração de logging com banner amigável
+LOG_FORMAT = "%(levelname)s: %(message)s"
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logging.getLogger('discord').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
@@ -39,10 +40,12 @@ class OptimizedTicketBot(commands.Bot):
         )
         self.db = DatabaseManager()
         self.startup_time = datetime.now()
+        self._health_server_started = False
         
     async def setup_hook(self):
         """Configuração do bot."""
         try:
+            self._print_startup_banner()
             logger.info("Iniciando configuração do bot...")
             
             # Banco de dados com timeout
@@ -72,8 +75,8 @@ class OptimizedTicketBot(commands.Bot):
             logger.info("Iniciando task de fechamento...")
             self.auto_close_tickets.start()
             
-            # Servidor HTTP desabilitado para teste
-            logger.info("Servidor HTTP desabilitado - testando estabilidade")
+            # Health-check HTTP para BlazeHosting
+            self.ensure_health_server()
             
             logger.info("✅ Setup concluído com sucesso!")
             
@@ -127,6 +130,17 @@ class OptimizedTicketBot(commands.Bot):
     async def before_auto_close(self):
         await self.wait_until_ready()
     
+    def ensure_health_server(self):
+        """Inicializa servidor HTTP se configurado."""
+        should_enable = os.environ.get("ENABLE_HEALTH_SERVER", "true").lower() in {"1", "true", "yes", "on"}
+        if not should_enable:
+            logger.info("Servidor HTTP de health-check desabilitado por configuração.")
+            return
+        if self._health_server_started:
+            return
+        logger.info("Iniciando servidor HTTP de health-check para BlazeHosting...")
+        self.start_health_server()
+
     def start_health_server(self):
         """Inicia servidor HTTP para health check do BlazeHosting."""
         import threading
@@ -183,6 +197,22 @@ class OptimizedTicketBot(commands.Bot):
         # Executar em thread separada
         thread = threading.Thread(target=run_server, daemon=True)
         thread.start()
+        self._health_server_started = True
+
+    def _print_startup_banner(self):
+        """Mostra um banner elegante no terminal durante o boot."""
+        border = "═" * 60
+        db_status = "Ativo" if os.getenv("DATABASE_URL") else "Desconectado"
+        lines = [
+            f"🚀 Iniciando Bot UpLink • BlazeHosting",
+            f"🕒 {datetime.now():%d/%m/%Y %H:%M:%S}",
+            f"💾 Database: {db_status}",
+        ]
+        print("\n")
+        print(f"\033[95m╔{border}╗\033[0m")
+        for line in lines:
+            print(f"\033[95m║\033[0m {line:<58} \033[95m║\033[0m")
+        print(f"\033[95m╚{border}╝\033[0m")
 
 
 def main():

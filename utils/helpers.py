@@ -5,6 +5,7 @@ Utilitários e funções auxiliares para o sistema de tickets.
 import logging
 import asyncio
 from datetime import datetime
+from typing import Optional
 
 import discord
 
@@ -225,3 +226,25 @@ def format_timestamp(dt):
     if isinstance(dt, str):
         dt = datetime.fromisoformat(dt)
     return f"<t:{int(dt.timestamp())}:R>"
+
+
+def schedule_ephemeral_deletion(
+    interaction: discord.Interaction,
+    message: Optional[discord.Message] = None,
+    delay: int = 120,
+):
+    """Remove mensagens ephemerals após o tempo indicado."""
+
+    async def delete_ephemeral_message():
+        try:
+            await asyncio.sleep(delay)
+            if message is not None:
+                await message.delete()
+            else:
+                await interaction.delete_original_response()
+        except (discord.NotFound, discord.HTTPException):
+            pass
+        except Exception as exc:
+            logger.debug("Falha ao remover mensagem ephemeral: %s", exc)
+
+    asyncio.create_task(delete_ephemeral_message())
