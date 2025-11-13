@@ -8,6 +8,7 @@ import sys
 import logging
 import os
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import discord
 from discord.ext import commands, tasks
@@ -41,6 +42,7 @@ class OptimizedTicketBot(commands.Bot):
         self.db = DatabaseManager()
         self.startup_time = datetime.now()
         self._health_server_started = False
+        self.health_server_port = None
         
     async def setup_hook(self):
         """Configuração do bot."""
@@ -170,34 +172,130 @@ class OptimizedTicketBot(commands.Bot):
                 # Silenciar logs HTTP
                 pass
         
-        # BlazeHosting geralmente usa porta específica
-        port = int(os.environ.get('PORT', 25565))  # Porta comum para BlazeHosting
+        # Resolver porta que o painel disponibilizou
+        port, port_source = self._resolve_health_port()
+        allow_fallback = port_source == "default" or os.environ.get("ALLOW_HEALTH_PORT_FALLBACK", "false").lower() in {"1", "true", "yes", "on"}
+        port_candidates = [port]
+        if allow_fallback:
+            port_candidates.append(port + 1)
         
         def run_server():
-            try:
-                server = HTTPServer(('0.0.0.0', port), HealthHandler)
-                logger.info(f"🌐 Servidor HTTP iniciado na porta {port}")
-                server.serve_forever()
-            except OSError as e:
-                if "Address already in use" in str(e):
-                    logger.warning(f"Porta {port} já em uso - tentando porta alternativa")
-                    # Tentar porta alternativa
-                    try:
-                        alt_port = port + 1
-                        server = HTTPServer(('0.0.0.0', alt_port), HealthHandler)
-                        logger.info(f"🌐 Servidor HTTP iniciado na porta alternativa {alt_port}")
-                        server.serve_forever()
-                    except Exception as alt_e:
-                        logger.error(f"Erro na porta alternativa: {alt_e}")
-                else:
-                    logger.error(f"Erro no servidor HTTP: {e}")
-            except Exception as e:
-                logger.error(f"Erro inesperado no servidor HTTP: {e}")
+            started = False
+            for idx, candidate in enumerate(port_candidates):
+                try:
+                    server = HTTPServer(('0.0.0.0', candidate), HealthHandler)
+                    self.health_server_port = candidate
+                    started = True
+                    resolved_msg = f"{candidate} (fonte: {port_source})"
+                    if idx > 0:
+                        logger.info(f"🌐 Servidor HTTP iniciado na porta alternativa {resolved_msg}")
+                    else:
+                        logger.info(f"🌐 Servidor HTTP iniciado na porta {resolved_msg}")
+                    server.serve_forever()
+                    break
+                except OSError as e:
+                    if "Address already in use" in str(e):
+                        if allow_fallback and idx == 0:
+                            logger.warning(f"Porta {candidate} em uso - tentando porta alternativa")
+                            continue
+                        logger.error(f"Porta {candidate} já está em uso e é a esperada pelo painel BlazeHosting.")
+                    else:
+                        logger.error(f"Erro no servidor HTTP: {e}")
+                    break
+                except Exception as e:
+                    logger.error(f"Erro inesperado no servidor HTTP: {e}")
+                    break
+            if not started:
+                logger.error("❌ Não foi possível iniciar o servidor HTTP de health-check.")
         
         # Executar em thread separada
         thread = threading.Thread(target=run_server, daemon=True)
         thread.start()
         self._health_server_started = True
+    
+    def _resolve_health_port(self):
+        """Obtém a porta de health-check exposta pela BlazeHosting."""
+        env_candidates = [
+            "HEALTH_SERVER_PORT",
+            "BLAZE_HEALTH_PORT",
+            "BLAZE_PORT",
+            "SERVER_PORT",
+            "APP_PORT",
+            "HTTP_PORT",
+            "PORT",
+            "PORT0",
+            "PORT_0",
+        ]
+        for var in env_candidates:
+            port = self._parse_port_value(os.environ.get(var))
+            if port:
+                return port, f"env:{var}"
+        
+        address_candidates = [
+            "SERVER",
+            "SERVER_IP",
+            "SERVER_ADDR",
+            "SERVER_ADDRESS",
+            "BLAZE_ENDPOINT",
+            "APP_URL",
+            "PUBLIC_URL",
+            "LISTEN_ADDRESS",
+            "HOST",
+            "HOSTNAME",
+            "IP",
+        ]
+        for var in address_candidates:
+            port = self._extract_port_from_address(os.environ.get(var))
+            if port:
+                return port, f"env:{var}"
+        
+        file_candidates = ["PORT_FILE", "BLAZE_PORT_FILE"]
+        for var in file_candidates:
+            path = os.environ.get(var)
+            if path and os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as fh:
+                        port = self._parse_port_value(fh.read().strip())
+                        if port:
+                            return port, f"file:{var}"
+                except OSError as e:
+                    logger.warning(f"Não foi possível ler {path}: {e}")
+        
+        return 25565, "default"
+
+    @staticmethod
+    def _parse_port_value(value):
+        """Converte diferentes fontes em porta válida."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            port = int(text)
+        except ValueError:
+            return None
+        if 1 <= port <= 65535:
+            return port
+        return None
+
+    @staticmethod
+    def _extract_port_from_address(value):
+        """Extrai porta de strings como sd-br.host:26244."""
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = urlparse(text if "://" in text else f"http://{text}")
+            if parsed.port:
+                return parsed.port
+        except Exception:
+            pass
+        if ":" in text:
+            return OptimizedTicketBot._parse_port_value(text.rsplit(":", 1)[-1])
+        return None
 
     def _print_startup_banner(self):
         """Mostra um banner elegante no terminal durante o boot."""
