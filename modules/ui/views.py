@@ -44,8 +44,7 @@ class TicketView(discord.ui.View):
                         f"**Motivo atual:** {ticket['reason']}\n"
                         f"**Criado em:** <t:{int(ticket['created_at'].timestamp())}:R>\n\n"
                         f"💡 **Dica:** Você pode usar o mesmo canal para novos problemas!",
-                        ephemeral=True,
-                        delete_after=30
+                        ephemeral=True
                     )
                     return
             
@@ -57,16 +56,14 @@ class TicketView(discord.ui.View):
             await interaction.response.send_message(
                 "🎫 **Selecione o motivo do seu chamado:**",
                 view=view,
-                ephemeral=True,
-                delete_after=300
+                ephemeral=True
             )
             
         except Exception as e:
             logger.error(f"Erro ao abrir ticket: {e}")
             await interaction.response.send_message(
                 "❌ Erro interno. Tente novamente.",
-                ephemeral=True,
-                delete_after=30
+                ephemeral=True
             )
 
 
@@ -101,16 +98,14 @@ class ReopenTicketView(discord.ui.View):
             if not ticket:
                 await interaction.response.send_message(
                     "❌ Este não é um canal de ticket válido.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
                 
             if ticket['status'] != 'closed':
                 await interaction.response.send_message(
                     f"❌ Este ticket não está fechado. Status atual: {ticket['status']}",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             
@@ -119,8 +114,7 @@ class ReopenTicketView(discord.ui.View):
             if user.id != ticket['user_id']:
                 await interaction.response.send_message(
                     "❌ Apenas o dono do ticket pode reabri-lo.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             
@@ -138,7 +132,6 @@ class ReopenTicketView(discord.ui.View):
             logger.error(f"Erro ao reabrir ticket via botão: {e}")
             await interaction.response.send_message(
                 "❌ Erro interno ao reabrir ticket.",
-                ephemeral=True,
-                delete_after=30
+                ephemeral=True
             )
 

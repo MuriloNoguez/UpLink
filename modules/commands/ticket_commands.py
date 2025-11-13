@@ -30,8 +30,7 @@ class TicketCommands(commands.Cog):
                 "🎫 **Sistema de Tickets**\n"
                 "Para abrir um ticket, use o sistema configurado no canal de suporte.\n"
                 "Ou aguarde, estamos preparando a interface...",
-                ephemeral=True,
-                delete_after=30
+                ephemeral=True
             )
         except Exception as e:
             logger.error(f"Erro no comando ticket: {e}")
@@ -47,8 +46,7 @@ class TicketCommands(commands.Cog):
             if not interaction.user.guild_permissions.administrator:
                 await interaction.response.send_message(
                     "❌ Apenas administradores podem verificar o status do keep-alive.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             
@@ -56,8 +54,7 @@ class TicketCommands(commands.Cog):
             if not hasattr(self.bot, 'keep_alive_system'):
                 await interaction.response.send_message(
                     "⚠️ Sistema keep-alive não está inicializado.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             
@@ -113,14 +110,13 @@ class TicketCommands(commands.Cog):
             
             embed.set_footer(text="Sistema mantém o bot ativo a cada 30 minutos")
             
-            await interaction.response.send_message(embed=embed, ephemeral=True, delete_after=60)
+            await interaction.response.send_message(embed=embed, ephemeral=True)
             
         except Exception as e:
             logger.error(f"Erro no comando keepalive_status: {e}")
             await interaction.response.send_message(
                 "❌ Erro ao obter status do keep-alive.",
-                ephemeral=True,
-                delete_after=30
+                ephemeral=True
             )
     
     @discord.app_commands.command(name="setup_tickets", description="Configura o sistema de tickets em um canal")
@@ -138,8 +134,7 @@ class TicketCommands(commands.Cog):
             if not interaction.user.guild_permissions.manage_channels:
                 await interaction.response.send_message(
                     "❌ Você não tem permissão para usar este comando.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             
@@ -178,16 +173,14 @@ class TicketCommands(commands.Cog):
             if not ticket:
                 await interaction.response.send_message(
                     "❌ Este comando só pode ser usado em canais de ticket.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             
             if ticket['status'] == 'closed':
                 await interaction.response.send_message(
                     "❌ Este ticket já está fechado.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return            # Verificar permissões
             user = interaction.user
@@ -198,8 +191,7 @@ class TicketCommands(commands.Cog):
             if not (is_ticket_owner or has_support_role or has_manage_channels):
                 await interaction.response.send_message(
                     "❌ Você não tem permissão para fechar este ticket.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             
@@ -236,16 +228,14 @@ class TicketCommands(commands.Cog):
             if not ticket:
                 await interaction.response.send_message(
                     "❌ Este comando só pode ser usado em canais de ticket.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             
             if ticket['status'] == 'closed':
                 await interaction.response.send_message(
                     "❌ Este ticket já está fechado.",
-                    ephemeral=True,
-                    delete_after=30
+                    ephemeral=True
                 )
                 return
             

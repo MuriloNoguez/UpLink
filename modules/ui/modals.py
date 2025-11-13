@@ -50,7 +50,7 @@ class ReasonSelect(discord.ui.Select):
             logger.error(f"Erro no callback do select: {e}")
             await interaction.followup.send(
                 "❌ Ocorreu um erro. Tente novamente.",
-                ephemeral=True, delete_after=30
+                ephemeral=True
             )
 
 
@@ -101,7 +101,7 @@ class DescriptionModal(discord.ui.Modal):
                 logger.error(f"Bot sem permissões necessárias no servidor {guild.name}: {perms_list}")
                 await interaction.followup.send(
                     f"❌ O bot não possui permissões necessárias neste servidor: {perms_list}. Peça a um administrador para conceder essas permissões ao cargo do bot e tente novamente.",
-                    ephemeral=True, delete_after=60
+                    ephemeral=True
                 )
                 return
             
@@ -110,6 +110,8 @@ class DescriptionModal(discord.ui.Modal):
             existing_channel = None
             ticket_id = None
             is_reopened = False
+            # Controla se devemos pular o embed padrão (quando já enviamos a mensagem de reabertura)
+            skip_normal_embed = False
             
             if latest_ticket:
                 # Buscar o canal existente
@@ -151,8 +153,7 @@ class DescriptionModal(discord.ui.Modal):
                         inline=False
                     )
                     
-                    # Importar view de controle
-                    from .views import TicketControlView
+                    # Usar view de controle (import no topo do módulo evita sombreamento de nome)
                     control_view = TicketControlView()
                     
                     # ENVIAR MENSAGEM IMEDIATAMENTE
@@ -180,8 +181,7 @@ class DescriptionModal(discord.ui.Modal):
                     # Pular a criação normal do embed (já foi enviado)
                     skip_normal_embed = True
             
-            # Variável para controlar se deve pular embed normal
-            skip_normal_embed = False
+            # Nota: `skip_normal_embed` já foi inicializada acima
             
             if not existing_channel:
                 # Criar novo canal se não existe um canal anterior
@@ -243,7 +243,7 @@ class DescriptionModal(discord.ui.Modal):
                     await channel.delete(reason="Erro ao criar ticket no banco")
                 await interaction.followup.send(
                     "❌ Erro ao criar ticket. Tente novamente.",
-                    ephemeral=True, delete_after=30
+                    ephemeral=True
                 )
                 return
             
@@ -379,9 +379,9 @@ class DescriptionModal(discord.ui.Modal):
             # we must use interaction.response.send_message, otherwise followup is allowed.
             try:
                 if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ Ocorreu um erro. Tente novamente.", ephemeral=True, delete_after=30)
+                    await interaction.response.send_message("❌ Ocorreu um erro. Tente novamente.", ephemeral=True)
                 else:
-                    await interaction.followup.send("❌ Ocorreu um erro. Tente novamente.", ephemeral=True, delete_after=30)
+                    await interaction.followup.send("❌ Ocorreu um erro. Tente novamente.", ephemeral=True)
             except Exception:
                 # Last resort: log the failure. Avoid raising further to keep bot stable.
                 logger.exception("Falha ao notificar usuário sobre erro no select")
@@ -445,7 +445,7 @@ class CloseStatusSelect(discord.ui.Select):
             logger.error(f"Erro no callback do pause select: {e}")
             await interaction.followup.send(
                 "❌ Ocorreu um erro. Tente novamente.",
-                ephemeral=True, delete_after=30
+                ephemeral=True
             )
 
 
