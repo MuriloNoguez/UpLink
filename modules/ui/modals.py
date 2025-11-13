@@ -502,10 +502,10 @@ class PauseDescriptionModal(discord.ui.Modal):
             
             # Definir cores e emojis baseados no status
             status_config = {
-                "resolvido": {"color": 0x00ff00, "emoji": "✅", "title": "Ticket Resolvido"},
-                "chamado_aberto": {"color": 0x0099ff, "emoji": "📞", "title": "Chamado Aberto"},
-                "aguardando_resposta": {"color": 0xffa500, "emoji": "⏳", "title": "Aguardando Resposta"},
-                "em_analise": {"color": 0x9932cc, "emoji": "🔍", "title": "Em Análise"}
+                "resolvido": {"color": 0x00ff00, "emoji": "✅", "title": "🎯 PROBLEMA RESOLVIDO"},
+                "chamado_aberto": {"color": 0x0099ff, "emoji": "📞", "title": "📞 CHAMADO ABERTO"},
+                "aguardando_resposta": {"color": 0xffa500, "emoji": "⏳", "title": "⏳ AGUARDANDO RESPOSTA"},
+                "em_analise": {"color": 0x9932cc, "emoji": "🔍", "title": "🔍 EM ANÁLISE"}
             }
             
             config = status_config.get(self.status, status_config["resolvido"])
@@ -519,25 +519,44 @@ class PauseDescriptionModal(discord.ui.Modal):
             )
             
             embed.add_field(
-                name="👤 Administrador",
+                name="👤 Responsável",
                 value=user.mention,
                 inline=True
             )
             
             embed.add_field(
-                name="📅 Data",
+                name="📅 Concluído em",
                 value=f"<t:{int(datetime.now().timestamp())}:f>",
                 inline=True
             )
             
-            # Enviar mensagem de status
-            await channel.send(embed=embed)
+            # Adicionar campo específico para status resolvido
+            if self.status == "resolvido":
+                embed.add_field(
+                    name="🎉 Status Final",
+                    value="**PROBLEMA RESOLVIDO COM SUCESSO!**\n"
+                         "Este ticket foi concluído e pode ser fechado.",
+                    inline=False
+                )
             
-            # Usar a função helper otimizada para fechar
+            # Enviar mensagem de status PRIMEIRO (antes de qualquer alteração)
+            status_message = await channel.send(embed=embed)
+            
+            # Aguardar um momento para garantir que a mensagem foi enviada e processada
+            import asyncio
+            await asyncio.sleep(2)
+            
+            # Usar a função helper otimizada para fechar (pulando mensagem padrão)
             from utils.helpers import close_ticket_channel
-            await close_ticket_channel(interaction.client, channel, auto_close=False)
+            await close_ticket_channel(interaction.client, channel, auto_close=False, skip_close_message=True)
             
             logger.info(f"Ticket {self.ticket['id']} fechado por {user} com status: {self.status}")
+            
+            # Confirmar para o usuário que o status foi definido
+            await interaction.followup.send(
+                f"✅ Ticket fechado com status: **{config['title']}**",
+                ephemeral=True
+            )
             
         except Exception as e:
             logger.error(f"Erro ao fechar ticket: {e}")

@@ -47,9 +47,15 @@ def resolve_emoji(bot: discord.Client, emoji_str: str, guild: discord.Guild = No
     return emoji_str
 
 
-async def close_ticket_channel(bot, channel: discord.TextChannel, auto_close: bool = False):
+async def close_ticket_channel(bot, channel: discord.TextChannel, auto_close: bool = False, skip_close_message: bool = False):
     """
     Fecha um canal de ticket garantindo que a mensagem de fechamento apareça.
+    
+    Args:
+        bot: Cliente do bot
+        channel: Canal do ticket
+        auto_close: Se o fechamento é automático
+        skip_close_message: Se deve pular a mensagem padrão de fechamento
     """
     try:
         # Buscar dados do ticket antes de fechar
@@ -75,12 +81,19 @@ async def close_ticket_channel(bot, channel: discord.TextChannel, auto_close: bo
                 inline=False
             )
         
-        # Importar view de reabertura
-        from modules.ui.views import ReopenTicketView
-        reopen_view = ReopenTicketView()
-        
-        # ENVIAR MENSAGEM PRIMEIRO, antes de alterar permissões
-        await channel.send(embed=embed, view=reopen_view)
+        # ENVIAR MENSAGEM APENAS SE NÃO FOR PARA PULAR
+        if not skip_close_message:
+            # Importar view de reabertura
+            from modules.ui.views import ReopenTicketView
+            reopen_view = ReopenTicketView()
+            
+            # ENVIAR MENSAGEM PRIMEIRO, antes de alterar permissões
+            await channel.send(embed=embed, view=reopen_view)
+        else:
+            # Mesmo pulando a mensagem, vamos adicionar o botão de reabertura
+            from modules.ui.views import ReopenTicketView
+            reopen_view = ReopenTicketView()
+            await channel.send(view=reopen_view)
         
         # Fazer alterações em background para evitar rate limiting
         import asyncio

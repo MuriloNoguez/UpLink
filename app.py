@@ -97,7 +97,7 @@ class OptimizedTicketBot(commands.Bot):
     
     async def close_ticket_channel(self, channel: discord.TextChannel, auto_close: bool = False):
         """Wrapper para compatibilidade."""
-        await close_ticket_channel(self, channel, auto_close)
+        await close_ticket_channel(self, channel, auto_close, skip_close_message=False)
     
     @tasks.loop(minutes=BOT_CONFIG['auto_close_check_minutes'])
     async def auto_close_tickets(self):
