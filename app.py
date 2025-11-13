@@ -261,6 +261,16 @@ class OptimizedTicketBot(commands.Bot):
                 except OSError as e:
                     logger.warning(f"Não foi possível ler {path}: {e}")
         
+        fallback_endpoints = [
+            os.environ.get("DEFAULT_HEALTH_ENDPOINT"),
+            "sd-br2.blazebr.com:26244",
+        ]
+        for endpoint in fallback_endpoints:
+            port = self._extract_port_from_address(endpoint)
+            if port:
+                source = endpoint if endpoint else "DEFAULT_HEALTH_ENDPOINT"
+                return port, f"fallback:{source}"
+        
         return 25565, "default"
 
     @staticmethod
