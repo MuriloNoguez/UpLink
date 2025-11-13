@@ -456,92 +456,44 @@ class PauseDescriptionModal(discord.ui.Modal):
             channel = interaction.channel
             user = interaction.user
             
-            # Fechar o ticket no banco
-            if interaction.client.db.close_ticket(channel.id):
-                # Modificar permissões do canal
-                ticket_owner_id = self.ticket['user_id']
-                ticket_owner = interaction.guild.get_member(ticket_owner_id)
-                
-                if ticket_owner:
-                    try:
-                        await channel.set_permissions(
-                            ticket_owner,
-                            send_messages=False,
-                            add_reactions=False,
-                            view_channel=True  # Ainda pode ver mas não interagir
-                        )
-                    except discord.HTTPException as e:
-                        if e.status == 429:  # Rate limited
-                            logger.warning(f"Rate limited ao alterar permissões do canal {channel.name} - continuando com fechamento")
-                        else:
-                            logger.error(f"Erro ao alterar permissões do canal: {e}")
-                    except Exception as e:
-                        logger.error(f"Erro inesperado ao alterar permissões: {e}")
-                
-                # Renomear canal com emoji de fechado
-                new_name = f"🔒{channel.name}"
-                if not channel.name.startswith("🔒"):
-                    try:
-                        await channel.edit(name=new_name)
-                    except discord.HTTPException as e:
-                        if e.status == 429:  # Rate limited
-                            logger.warning(f"Rate limited ao renomear canal {channel.name} - continuando com fechamento")
-                        else:
-                            logger.error(f"Erro ao renomear canal: {e}")
-                    except Exception as e:
-                        logger.error(f"Erro inesperado ao renomear canal: {e}")
-                
-                # Definir cores e emojis baseados no status
-                status_config = {
-                    "resolvido": {"color": 0x00ff00, "emoji": "✅", "title": "Ticket Resolvido"},
-                    "chamado_aberto": {"color": 0x0099ff, "emoji": "📞", "title": "Chamado Aberto"},
-                    "aguardando_resposta": {"color": 0xffa500, "emoji": "⏳", "title": "Aguardando Resposta"},
-                    "em_analise": {"color": 0x9932cc, "emoji": "🔍", "title": "Em Análise"}
-                }
-                
-                config = status_config.get(self.status, status_config["resolvido"])
-                
-                # Enviar embed com status
-                embed = discord.Embed(
-                    title=f"{config['emoji']} {config['title']}",
-                    description=self.description.value,
-                    color=config['color'],
-                    timestamp=datetime.now()
-                )
-                
-                embed.add_field(
-                    name="👤 Administrador",
-                    value=user.mention,
-                    inline=True
-                )
-                
-                embed.add_field(
-                    name="📅 Data",
-                    value=f"<t:{int(datetime.now().timestamp())}:f>",
-                    inline=True
-                )
-                
-                # Adicionar view com botão de reabrir
-                from .views import ReopenTicketView
-                reopen_view = ReopenTicketView()
-                
-                try:
-                    await channel.send(embed=embed, view=reopen_view)
-                    logger.info(f"Ticket {self.ticket['id']} fechado por {user} com status: {self.status}")
-                except discord.HTTPException as e:
-                    if e.status == 429:  # Rate limited
-                        logger.warning(f"Rate limited ao enviar mensagem de fechamento - ticket foi fechado no banco")
-                    else:
-                        logger.error(f"Erro ao enviar mensagem de fechamento: {e}")
-                except Exception as e:
-                    logger.error(f"Erro inesperado ao enviar mensagem: {e}")
-                    
-                # Log independente do sucesso do envio da mensagem
-                logger.info(f"Ticket {self.ticket['id']} fechado no banco por {user} com status: {self.status}")
-            else:
-                await interaction.followup.send(
-                    "❌ Erro ao fechar ticket."
-                )
+            # Definir cores e emojis baseados no status
+            status_config = {
+                "resolvido": {"color": 0x00ff00, "emoji": "✅", "title": "Ticket Resolvido"},
+                "chamado_aberto": {"color": 0x0099ff, "emoji": "📞", "title": "Chamado Aberto"},
+                "aguardando_resposta": {"color": 0xffa500, "emoji": "⏳", "title": "Aguardando Resposta"},
+                "em_analise": {"color": 0x9932cc, "emoji": "🔍", "title": "Em Análise"}
+            }
+            
+            config = status_config.get(self.status, status_config["resolvido"])
+            
+            # Enviar embed com status PRIMEIRO
+            embed = discord.Embed(
+                title=f"{config['emoji']} {config['title']}",
+                description=self.description.value,
+                color=config['color'],
+                timestamp=datetime.now()
+            )
+            
+            embed.add_field(
+                name="👤 Administrador",
+                value=user.mention,
+                inline=True
+            )
+            
+            embed.add_field(
+                name="📅 Data",
+                value=f"<t:{int(datetime.now().timestamp())}:f>",
+                inline=True
+            )
+            
+            # Enviar mensagem de status
+            await channel.send(embed=embed)
+            
+            # Usar a função helper otimizada para fechar
+            from utils.helpers import close_ticket_channel
+            await close_ticket_channel(interaction.client, channel, auto_close=False)
+            
+            logger.info(f"Ticket {self.ticket['id']} fechado por {user} com status: {self.status}")
             
         except Exception as e:
             logger.error(f"Erro ao fechar ticket: {e}")

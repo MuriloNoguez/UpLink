@@ -76,7 +76,6 @@ class TicketControlView(discord.ui.View):
     
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Verificar se o usuário tem permissão para usar os botões."""
-        # Para o botão de fechar, apenas admins
         user = interaction.user
         has_support_role = discord.utils.get(user.roles, name=BOT_CONFIG['support_role_name']) is not None
         has_manage_channels = user.guild_permissions.manage_channels
@@ -89,6 +88,36 @@ class TicketControlView(discord.ui.View):
             return False
         
         return True
+    
+    @discord.ui.button(
+        label="Fechar Ticket",
+        style=discord.ButtonStyle.danger,
+        emoji="🔒",
+        custom_id="close_ticket_button"
+    )
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Callback para fechar ticket."""
+        try:
+            # Verificar se é canal de ticket
+            ticket = interaction.client.db.get_ticket_by_channel(interaction.channel.id)
+            if not ticket:
+                await interaction.response.send_message(
+                    "❌ Este não é um canal de ticket válido.",
+                    ephemeral=True
+                )
+                return
+            
+            # Usar função helper otimizada
+            from utils.helpers import close_ticket_channel
+            await interaction.response.send_message("🔒 Fechando ticket...", ephemeral=True)
+            await close_ticket_channel(interaction.client, interaction.channel)
+            
+        except Exception as e:
+            logger.error(f"Erro ao fechar ticket: {e}")
+            await interaction.followup.send(
+                "❌ Erro ao fechar ticket.",
+                ephemeral=True
+            )
     
 
 

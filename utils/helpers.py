@@ -49,62 +49,20 @@ def resolve_emoji(bot: discord.Client, emoji_str: str, guild: discord.Guild = No
 
 async def close_ticket_channel(bot, channel: discord.TextChannel, auto_close: bool = False):
     """
-    Fecha um canal de ticket (mas não o exclui, apenas muda permissões).
-    
-    Args:
-        bot: Instância do bot
-        channel: Canal a ser fechado
-        auto_close: Se é fechamento automático
+    Fecha um canal de ticket garantindo que a mensagem de fechamento apareça.
     """
     try:
+        # Buscar dados do ticket antes de fechar
+        ticket = bot.db.get_ticket_by_channel(channel.id)
+        
         # Atualizar no banco
         bot.db.close_ticket(channel.id)
         
-        # Modificar permissões do canal
-        guild = channel.guild
-        everyone_role = guild.default_role
-        
-        # Buscar o dono do ticket
-        ticket = bot.db.get_ticket_by_channel(channel.id)
-        if ticket:
-            ticket_owner = guild.get_member(ticket['user_id'])
-            if ticket_owner:
-                # Tornar somente leitura para o dono
-                await channel.set_permissions(
-                    ticket_owner, 
-                    send_messages=False,
-                    add_reactions=False,
-                    view_channel=True
-                )
-                # Pequeno delay para evitar rate limit
-                await asyncio.sleep(0.5)
-        
-        # Tornar somente leitura para @everyone
-        await channel.set_permissions(
-            everyone_role, 
-            send_messages=False,
-            add_reactions=False
-        )
-        
-        # Delay antes de renomear
-        await asyncio.sleep(1)
-        
-        # Renomear canal com emoji de cadeado (apenas se não estiver já fechado)
-        if not channel.name.startswith("🔒"):
-            new_name = f"🔒{channel.name}"
-            try:
-                await channel.edit(name=new_name)
-            except discord.HTTPException as e:
-                if e.status == 429:  # Rate limited
-                    logger.warning(f"Rate limited ao renomear canal {channel.name}, pulando renomeação")
-                else:
-                    raise
-        
-        # Enviar mensagem de fechamento
+        # Preparar embed de fechamento ANTES de alterar permissões
         embed = discord.Embed(
-            title="🔒 **TICKET FECHADO**",
-            description="**Este ticket foi fechado e está agora em modo somente leitura.**\n\n"
-                       "**Histórico Preservado:** Todo o histórico foi mantido.\n\n"
+            title="🔒 TICKET FECHADO",
+            description="Este ticket foi fechado e está agora em modo somente leitura.\n\n"
+                       "**Histórico Preservado:** Todo o histórico foi mantido.\n"
                        "**Reabertura:** Use o botão abaixo para reabrir este ticket.",
             color=EMBED_COLORS['closed'],
             timestamp=datetime.now()
@@ -112,19 +70,64 @@ async def close_ticket_channel(bot, channel: discord.TextChannel, auto_close: bo
         
         if auto_close:
             embed.add_field(
-                name="⏰ **Motivo**",
-                value=f"**Fechamento automático após {BOT_CONFIG['auto_close_hours']} horas**",
+                name="⏰ Motivo",
+                value=f"Fechamento automático após {BOT_CONFIG['auto_close_hours']} horas",
                 inline=False
             )
         
-        # Importar e usar a view de reabertura
+        # Importar view de reabertura
         from modules.ui.views import ReopenTicketView
         reopen_view = ReopenTicketView()
         
+        # ENVIAR MENSAGEM PRIMEIRO, antes de alterar permissões
         await channel.send(embed=embed, view=reopen_view)
+        
+        # Agora modificar permissões
+        guild = channel.guild
+        
+        # Buscar o dono do ticket
+        if ticket:
+            ticket_owner = guild.get_member(ticket['user_id'])
+            if ticket_owner:
+                try:
+                    await channel.set_permissions(
+                        ticket_owner, 
+                        send_messages=False,
+                        add_reactions=False,
+                        view_channel=True
+                    )
+                    await asyncio.sleep(0.3)  # Pequeno delay
+                except Exception as e:
+                    logger.warning(f"Erro ao alterar permissões do usuário: {e}")
+        
+        # Tornar somente leitura para @everyone
+        try:
+            await channel.set_permissions(
+                guild.default_role, 
+                send_messages=False,
+                add_reactions=False
+            )
+            await asyncio.sleep(0.3)
+        except Exception as e:
+            logger.warning(f"Erro ao alterar permissões gerais: {e}")
+        
+        # Renomear canal (por último)
+        if not channel.name.startswith("🔒"):
+            try:
+                new_name = f"🔒{channel.name}"
+                await channel.edit(name=new_name)
+            except Exception as e:
+                logger.warning(f"Erro ao renomear canal: {e}")
+        
+        logger.info(f"Ticket {channel.id} fechado com sucesso")
         
     except Exception as e:
         logger.error(f"Erro ao fechar canal {channel.id}: {e}")
+        # Tentar enviar mensagem de erro
+        try:
+            await channel.send("❌ Erro ao fechar ticket. Contate um administrador.")
+        except:
+            pass
 
 
 async def setup_tickets_in_channel(bot, channel: discord.TextChannel):

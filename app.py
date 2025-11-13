@@ -4,94 +4,56 @@
 Arquivo principal app.py para hospedagem.
 """
 
-import os
 import sys
 import logging
-import asyncio
 from datetime import datetime, timedelta
 
 import discord
 from discord.ext import commands, tasks
 
-from config import validate_config, DISCORD_TOKEN, BOT_CONFIG, EMBED_COLORS
+from config import validate_config, DISCORD_TOKEN, BOT_CONFIG
 from database import DatabaseManager
 from modules.ui.views import TicketView, TicketControlView, ReopenTicketView
 from modules.commands.ticket_commands import TicketCommands
 from utils.helpers import close_ticket_channel
-from keep_alive import setup_keep_alive
 
-# Configuração otimizada de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Formato mais simples
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # Apenas output direto, sem arquivo
-    ]
-)
-
-# Reduzir logs de bibliotecas externas
-logging.getLogger('discord.gateway').setLevel(logging.WARNING)
-logging.getLogger('discord.http').setLevel(logging.WARNING)
-logging.getLogger('aiohttp').setLevel(logging.WARNING)
-
+# Configuração simples de logging
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logging.getLogger('discord').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# Intents mínimos necessários
+# Intents necessários
 intents = discord.Intents.default()
 intents.message_content = True
-intents.guilds = True
 
 
 class OptimizedTicketBot(commands.Bot):
-    """Bot otimizado para produção no BlazeHosting."""
+    """Bot otimizado para hospedagem dedicada no BlazeHosting."""
     
     def __init__(self):
         super().__init__(
             command_prefix=BOT_CONFIG['command_prefix'],
             intents=intents,
-            help_command=None,
-            # Otimizações de conexão
-            max_messages=100,  # Cache menor de mensagens
-            chunk_guilds_at_startup=False  # Não carregar membros na inicialização
+            help_command=None
         )
         self.db = DatabaseManager()
         self.startup_time = datetime.now()
         
     async def setup_hook(self):
-        """Configuração rápida sem sincronização."""
-        logger.info("⚡ Configuração rápida iniciada...")
-        
+        """Configuração do bot."""
         # Banco de dados
-        if not self.db.init_database():
-            logger.error("❌ Falha no banco de dados!")
-            return
-            
-        # Comandos
+        self.db.init_database()
+        
+        # Comandos e views
         await self.add_cog(TicketCommands(self))
+        await self.tree.sync()
         
-        # Sincronizar comandos slash (apenas uma vez)
-        try:
-            synced = await self.tree.sync()
-            logger.info(f"🔄 {len(synced)} comandos sincronizados com Discord")
-        except Exception as e:
-            logger.error(f"❌ Erro ao sincronizar comandos: {e}")
-        
-        # Views persistentes
         self.add_view(TicketView())
         self.add_view(TicketControlView())
         self.add_view(ReopenTicketView())
         
-        # Tasks
-        if not self.auto_close_tickets.is_running():
-            self.auto_close_tickets.start()
-            
-        # Keep-alive
-        await setup_keep_alive(self)
-        
-        # Servidor HTTP simples para o BlazeHosting
-        self.start_http_server()
-        
-        logger.info("✅ Bot configurado e pronto!")
+        # Task de fechamento automático
+        self.auto_close_tickets.start()
     
     async def on_ready(self):
         """Bot pronto - versão otimizada."""
@@ -146,63 +108,13 @@ class OptimizedTicketBot(commands.Bot):
     
     @auto_close_tickets.before_loop
     async def before_auto_close(self):
-        """Aguarda bot estar pronto."""
         await self.wait_until_ready()
-    
-    def start_http_server(self):
-        """Inicia servidor HTTP simples para o BlazeHosting detectar porta."""
-        import threading
-        from http.server import HTTPServer, BaseHTTPRequestHandler
-        
-        class HealthHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                if self.path == '/' or self.path == '/health':
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.end_headers()
-                    response = '{"status": "Bot online", "servers": ' + str(len(self.server.bot.guilds) if hasattr(self.server, 'bot') else 0) + '}'
-                    self.wfile.write(response.encode())
-                else:
-                    self.send_response(404)
-                    self.end_headers()
-            
-            def log_message(self, format, *args):
-                # Suprimir logs HTTP desnecessários
-                pass
-        
-        port = int(os.environ.get('PORT', 10000))
-        server = HTTPServer(('0.0.0.0', port), HealthHandler)
-        server.bot = self  # Passar referência do bot
-        
-        def run_server():
-            logger.info(f"🌐 Servidor HTTP iniciado na porta {port}")
-            server.serve_forever()
-        
-        thread = threading.Thread(target=run_server, daemon=True)
-        thread.start()
 
 
 def main():
-    """Inicialização otimizada."""
-    try:
-        # Validações rápidas
-        validate_config()
-        
-        # Log de início
-        print("🚀 INICIANDO UPLINK BOT...")
-        
-        # Criar e iniciar bot
-        bot = OptimizedTicketBot()
-        
-        # Executar
-        bot.run(DISCORD_TOKEN, log_handler=None)
-        
-    except KeyboardInterrupt:
-        print("\n👋 Bot finalizado")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"❌ Erro fatal: {e}")
-        sys.exit(1)
+    validate_config()
+    bot = OptimizedTicketBot()
+    bot.run(DISCORD_TOKEN, log_handler=None)
 
 
 if __name__ == "__main__":
