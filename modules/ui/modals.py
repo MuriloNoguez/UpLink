@@ -50,7 +50,7 @@ class ReasonSelect(discord.ui.Select):
             logger.error(f"Erro no callback do select: {e}")
             await interaction.followup.send(
                 "❌ Ocorreu um erro. Tente novamente.",
-                ephemeral=True, delete_after=60
+                ephemeral=True, delete_after=30
             )
 
 
@@ -243,7 +243,7 @@ class DescriptionModal(discord.ui.Modal):
                     await channel.delete(reason="Erro ao criar ticket no banco")
                 await interaction.followup.send(
                     "❌ Erro ao criar ticket. Tente novamente.",
-                    ephemeral=True, delete_after=60
+                    ephemeral=True, delete_after=30
                 )
                 return
             
@@ -360,11 +360,11 @@ class DescriptionModal(discord.ui.Modal):
                 ephemeral=True
             )
             
-            # Agendar exclusão da mensagem após 60 segundos
+            # Agendar exclusão da mensagem após 45 segundos
             import asyncio
             async def delete_after_delay():
                 try:
-                    await asyncio.sleep(60)
+                    await asyncio.sleep(45)
                     await message.delete()
                 except Exception:
                     pass  # Ignorar erros se a mensagem já foi deletada
@@ -379,9 +379,9 @@ class DescriptionModal(discord.ui.Modal):
             # we must use interaction.response.send_message, otherwise followup is allowed.
             try:
                 if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ Ocorreu um erro. Tente novamente.", ephemeral=True)
+                    await interaction.response.send_message("❌ Ocorreu um erro. Tente novamente.", ephemeral=True, delete_after=30)
                 else:
-                    await interaction.followup.send("❌ Ocorreu um erro. Tente novamente.", ephemeral=True)
+                    await interaction.followup.send("❌ Ocorreu um erro. Tente novamente.", ephemeral=True, delete_after=30)
             except Exception:
                 # Last resort: log the failure. Avoid raising further to keep bot stable.
                 logger.exception("Falha ao notificar usuário sobre erro no select")
@@ -445,7 +445,7 @@ class CloseStatusSelect(discord.ui.Select):
             logger.error(f"Erro no callback do pause select: {e}")
             await interaction.followup.send(
                 "❌ Ocorreu um erro. Tente novamente.",
-                ephemeral=True, delete_after=60
+                ephemeral=True, delete_after=30
             )
 
 

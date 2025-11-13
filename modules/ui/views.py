@@ -44,7 +44,8 @@ class TicketView(discord.ui.View):
                         f"**Motivo atual:** {ticket['reason']}\n"
                         f"**Criado em:** <t:{int(ticket['created_at'].timestamp())}:R>\n\n"
                         f"💡 **Dica:** Você pode usar o mesmo canal para novos problemas!",
-                        ephemeral=True
+                        ephemeral=True,
+                        delete_after=30
                     )
                     return
             
@@ -64,64 +65,18 @@ class TicketView(discord.ui.View):
             logger.error(f"Erro ao abrir ticket: {e}")
             await interaction.response.send_message(
                 "❌ Erro interno. Tente novamente.",
-                ephemeral=True
+                ephemeral=True,
+                delete_after=30
             )
 
 
 class TicketControlView(discord.ui.View):
-    """View com botões para controle administrativo dos tickets."""
+    """View vazia - controle apenas por comandos."""
     
     def __init__(self):
         super().__init__(timeout=None)
-    
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Verificar se o usuário tem permissão para usar os botões."""
-        user = interaction.user
-        has_support_role = discord.utils.get(user.roles, name=BOT_CONFIG['support_role_name']) is not None
-        has_manage_channels = user.guild_permissions.manage_channels
-        
-        if not (has_support_role or has_manage_channels):
-            await interaction.response.send_message(
-                "❌ Apenas administradores podem usar este botão.",
-                ephemeral=True
-            )
-            return False
-        
-        return True
-    
-    @discord.ui.button(
-        label="Fechar Ticket",
-        style=discord.ButtonStyle.danger,
-        emoji="🔒",
-        custom_id="close_ticket_button"
-    )
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """Callback para fechar ticket."""
-        try:
-            # Verificar se é canal de ticket
-            ticket = interaction.client.db.get_ticket_by_channel(interaction.channel.id)
-            if not ticket:
-                await interaction.response.send_message(
-                    "❌ Este não é um canal de ticket válido.",
-                    ephemeral=True
-                )
-                return
-            
-            # Mostrar modal de seleção de status
-            from .modals import CloseStatusView
-            view = CloseStatusView(ticket)
-            await interaction.response.send_message(
-                "🔒 **Selecione o status do fechamento:**",
-                view=view,
-                ephemeral=True
-            )
-            
-        except Exception as e:
-            logger.error(f"Erro ao fechar ticket: {e}")
-            await interaction.response.send_message(
-                "❌ Erro ao fechar ticket.",
-                ephemeral=True
-            )
+        # View vazia - apenas para manter compatibilidade
+        # Controle feito apenas pelos comandos slash
     
 
 
@@ -146,14 +101,16 @@ class ReopenTicketView(discord.ui.View):
             if not ticket:
                 await interaction.response.send_message(
                     "❌ Este não é um canal de ticket válido.",
-                    ephemeral=True
+                    ephemeral=True,
+                    delete_after=30
                 )
                 return
                 
             if ticket['status'] != 'closed':
                 await interaction.response.send_message(
                     f"❌ Este ticket não está fechado. Status atual: {ticket['status']}",
-                    ephemeral=True
+                    ephemeral=True,
+                    delete_after=30
                 )
                 return
             
@@ -162,7 +119,8 @@ class ReopenTicketView(discord.ui.View):
             if user.id != ticket['user_id']:
                 await interaction.response.send_message(
                     "❌ Apenas o dono do ticket pode reabri-lo.",
-                    ephemeral=True
+                    ephemeral=True,
+                    delete_after=30
                 )
                 return
             
@@ -180,6 +138,7 @@ class ReopenTicketView(discord.ui.View):
             logger.error(f"Erro ao reabrir ticket via botão: {e}")
             await interaction.response.send_message(
                 "❌ Erro interno ao reabrir ticket.",
-                ephemeral=True
+                ephemeral=True,
+                delete_after=30
             )
 
