@@ -72,11 +72,10 @@ class OptimizedTicketBot(commands.Bot):
             logger.info("Iniciando task de fechamento...")
             self.auto_close_tickets.start()
             
-            # Servidor HTTP para health check do BlazeHosting
-            logger.info("Iniciando servidor HTTP...")
-            self.start_health_server()
+            # Servidor HTTP desabilitado para teste
+            logger.info("Servidor HTTP desabilitado - testando estabilidade")
             
-            logger.info("Setup concluído com sucesso!")
+            logger.info("✅ Setup concluído com sucesso!")
             
         except Exception as e:
             logger.error(f"Erro durante setup: {e}")
@@ -136,30 +135,50 @@ class OptimizedTicketBot(commands.Bot):
         
         class HealthHandler(BaseHTTPRequestHandler):
             def do_GET(self):
-                if self.path in ['/', '/health', '/status']:
+                try:
                     self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Content-type', 'text/plain')
+                    self.send_header('Access-Control-Allow-Origin', '*')
                     self.end_headers()
-                    response = '{"status": "online", "bot": "UpLink"}'
-                    self.wfile.write(response.encode())
-                else:
-                    self.send_response(404)
+                    self.wfile.write(b'OK')
+                except Exception:
+                    pass
+            
+            def do_HEAD(self):
+                try:
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/plain')
                     self.end_headers()
+                except Exception:
+                    pass
             
             def log_message(self, format, *args):
-                # Suprimir logs HTTP desnecessários
+                # Silenciar logs HTTP
                 pass
         
-        # Usar porta do ambiente ou padrão 8000
-        port = int(os.environ.get('PORT', 8000))
+        # BlazeHosting geralmente usa porta específica
+        port = int(os.environ.get('PORT', 25565))  # Porta comum para BlazeHosting
         
         def run_server():
             try:
                 server = HTTPServer(('0.0.0.0', port), HealthHandler)
-                logger.info(f"Servidor HTTP health check na porta {port}")
+                logger.info(f"🌐 Servidor HTTP iniciado na porta {port}")
                 server.serve_forever()
+            except OSError as e:
+                if "Address already in use" in str(e):
+                    logger.warning(f"Porta {port} já em uso - tentando porta alternativa")
+                    # Tentar porta alternativa
+                    try:
+                        alt_port = port + 1
+                        server = HTTPServer(('0.0.0.0', alt_port), HealthHandler)
+                        logger.info(f"🌐 Servidor HTTP iniciado na porta alternativa {alt_port}")
+                        server.serve_forever()
+                    except Exception as alt_e:
+                        logger.error(f"Erro na porta alternativa: {alt_e}")
+                else:
+                    logger.error(f"Erro no servidor HTTP: {e}")
             except Exception as e:
-                logger.warning(f"Erro no servidor HTTP: {e}")
+                logger.error(f"Erro inesperado no servidor HTTP: {e}")
         
         # Executar em thread separada
         thread = threading.Thread(target=run_server, daemon=True)

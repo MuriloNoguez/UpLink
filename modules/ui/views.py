@@ -107,14 +107,18 @@ class TicketControlView(discord.ui.View):
                 )
                 return
             
-            # Usar função helper otimizada
-            from utils.helpers import close_ticket_channel
-            await interaction.response.send_message("🔒 Fechando ticket...", ephemeral=True)
-            await close_ticket_channel(interaction.client, interaction.channel)
+            # Mostrar modal de seleção de status
+            from .modals import CloseStatusView
+            view = CloseStatusView(ticket)
+            await interaction.response.send_message(
+                "🔒 **Selecione o status do fechamento:**",
+                view=view,
+                ephemeral=True
+            )
             
         except Exception as e:
             logger.error(f"Erro ao fechar ticket: {e}")
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "❌ Erro ao fechar ticket.",
                 ephemeral=True
             )
