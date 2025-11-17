@@ -118,7 +118,8 @@ async def close_ticket_channel(bot, channel: discord.TextChannel, auto_close: bo
                 await channel.set_permissions(
                     guild.default_role, 
                     send_messages=False,
-                    add_reactions=False
+                    add_reactions=False,
+                    view_channel=False  # mantém o ticket privado após o fechamento
                 )
                     
             except Exception as e:
