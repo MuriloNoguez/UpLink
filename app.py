@@ -19,10 +19,14 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-import psycopg2
-from psycopg2 import sql, Error
-from psycopg2.extras import DictCursor
 from dotenv import load_dotenv
+from prisma import Prisma
+import sqlite3
+import io
+import random
+from PIL import Image, ImageDraw, ImageFont
+
+
 
 # ==================================================================================================
 # CONFIGURAÇÃO (config.py)
@@ -99,6 +103,35 @@ TICKET_REASONS = [
     }
 ]
 
+# ==================================================================================================
+# ==================================================================================================
+# ID do aniversariante -> {nome, arquivo_imagem}
+# Imagens devem estar em ./assets/stickers/
+STICKERS_CONFIG = {
+    1: {'name': 'Teste', 'image': '1.png'}, # Configuração de Teste
+    2: {'name': 'Maria', 'image': 'maria.png'},
+    3: {'name': 'Pedro', 'image': 'pedro.png'},
+    4: {'name': 'Ana', 'image': 'ana.png'},
+    5: {'name': 'Lucas', 'image': 'lucas.png'},
+    6: {'name': 'Julia', 'image': 'julia.png'},
+    7: {'name': 'Marcos', 'image': 'marcos.png'},
+    8: {'name': 'Fernanda', 'image': 'fernanda.png'},
+    9: {'name': 'Gabriel', 'image': 'gabriel.png'},
+    10: {'name': 'Larissa', 'image': 'larissa.png'},
+    11: {'name': 'Rafael', 'image': 'rafael.png'},
+    12: {'name': 'Camila', 'image': 'camila.png'},
+    24: {'name': 'Camila 2', 'image': 'camila.png'} # Exemplo para 2 paginas
+}
+STICKER_COLS = 3
+STICKER_ROWS = 2 # 6 por página
+STICKERS_PER_PAGE = STICKER_COLS * STICKER_ROWS
+STICKER_WIDTH = 250 # Um pouco maior
+STICKER_HEIGHT = 300
+STICKER_PADDING = 30
+STICKER_BG_COLOR = (255, 223, 0) # Amarelo Ouro
+
+
+
 # Validação de configuração
 def validate_config():
     """Valida se todas as configurações necessárias estão presentes."""
@@ -121,322 +154,231 @@ logger = logging.getLogger(__name__)
 # ==================================================================================================
 
 class DatabaseManager:
-    """Gerenciador de conexão com PostgreSQL para o bot de tickets."""
-    
-    def __init__(self):
-        """Inicializa o gerenciador com configurações de ambiente."""
-        self.database_url = os.getenv('DATABASE_URL') or "postgresql://neondb_owner:npg_FJcdz9Qp6w4HPGJUPBEPHIZhvBBcJhGz@ep-wild-recipe-a5m5vx6y.us-east-2.aws.neon.tech/neondb?sslmode=require"
-        
-        parsed = urlparse(self.database_url)
-        self.config = {
-            'host': parsed.hostname,
-            'port': parsed.port or 5432,
-            'database': parsed.path[1:],  # Remove a barra inicial
-            'user': parsed.username,
-            'password': parsed.password,
-        }
-        
-    def get_connection(self) -> Optional[psycopg2.extensions.connection]:
+    def __init__(self, prisma: Prisma):
+        self.prisma = prisma
+
+    async def init_database(self):
+        # Prisma handles schema via 'prisma db push' or migrations.
+        # This is kept for compatibility flow, but does nothing or just logs.
+        logger.info("Prisma ORM active.")
+        return True
+
+    def get_connection(self):
+        # Not needed with Prisma
+        return None
+
+    async def add_ticket(self, user_id: int, user_name: str, channel_id: int, reason: str, description: str) -> Optional[int]:
         try:
-            connection = psycopg2.connect(
-                self.database_url,
-                cursor_factory=DictCursor,
-                connect_timeout=10
+            ticket = await self.prisma.tickets.create(
+                data={
+                    'user_id': user_id,
+                    'user_name': user_name,
+                    'channel_id': channel_id,
+                    'reason': reason,
+                    'description': description,
+                    'status': 'open'
+                }
             )
-            return connection
-        except Error as e:
-            logger.error(f"Erro ao conectar com PostgreSQL: {e}")
-            return None
-    
-    def test_connection(self) -> bool:
-        try:
-            connection = self.get_connection()
-            if connection:
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT 1")
-                connection.close()
-                logger.info("Conexão com PostgreSQL testada com sucesso")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Erro ao testar conexão: {e}")
-            return False
-    
-    def init_database(self) -> bool:
-        try:
-            connection = self.get_connection()
-            if not connection:
-                logger.error("Não foi possível conectar ao banco")
-                return False
-            
-            logger.info("Conectado ao PostgreSQL com sucesso")
-            
-            with connection.cursor() as cursor:
-                create_table_query = """
-                CREATE TABLE IF NOT EXISTS tickets (
-                    id SERIAL PRIMARY KEY,
-                    user_id BIGINT NOT NULL,
-                    user_name VARCHAR(255) NOT NULL,
-                    channel_id BIGINT UNIQUE NOT NULL,
-                    reason VARCHAR(255) NOT NULL,
-                    description TEXT,
-                    status VARCHAR(20) DEFAULT 'open',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    closed_at TIMESTAMP NULL,
-                    paused_at TIMESTAMP NULL,
-                    paused_by VARCHAR(255) NULL
-                );
-                """
-                cursor.execute(create_table_query)
-                
-                indexes = [
-                    "CREATE INDEX IF NOT EXISTS idx_tickets_user_id ON tickets(user_id);",
-                    "CREATE INDEX IF NOT EXISTS idx_tickets_channel_id ON tickets(channel_id);",
-                    "CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);",
-                    "CREATE INDEX IF NOT EXISTS idx_tickets_created_at ON tickets(created_at);"
-                ]
-                for index_query in indexes:
-                    cursor.execute(index_query)
-                
-                connection.commit()
-                logger.info("Tabela 'tickets' criada/verificada com sucesso")
-                
-            connection.close()
-            return True
-        except Exception as e:
-            logger.error(f"Erro ao inicializar banco: {e}")
-            return False
-    
-    def create_ticket(self, user_id: int, user_name: str, channel_id: int, 
-                     reason: str, description: str) -> Optional[int]:
-        try:
-            connection = self.get_connection()
-            if not connection:
-                return None
-            
-            with connection.cursor() as cursor:
-                insert_query = """
-                    INSERT INTO tickets (user_id, user_name, channel_id, reason, description)
-                    VALUES (%s, %s, %s, %s, %s)
-                    RETURNING id;
-                """
-                cursor.execute(insert_query, (user_id, user_name, channel_id, reason, description))
-                ticket_id = cursor.fetchone()['id']
-                connection.commit()
-                
-                logger.info(f"Ticket {ticket_id} criado para usuário {user_name}")
-                connection.close()
-                return ticket_id
+            logger.info(f"Ticket criado: {ticket.id} para {user_name}")
+            return ticket.id
         except Exception as e:
             logger.error(f"Erro ao criar ticket: {e}")
             return None
-    
-    def get_ticket_by_channel(self, channel_id: int) -> Optional[Dict[str, Any]]:
+
+    async def create_ticket(self, user_id: int, user_name: str, channel_id: int, reason: str, description: str) -> Optional[int]:
+        # Alias for add_ticket to match usage
+        return await self.add_ticket(user_id, user_name, channel_id, reason, description)
+
+    async def get_ticket(self, ticket_id: int) -> Optional[Dict[str, Any]]:
         try:
-            connection = self.get_connection()
-            if not connection:
-                return None
-            
-            with connection.cursor() as cursor:
-                query = "SELECT * FROM tickets WHERE channel_id = %s ORDER BY id DESC LIMIT 1;"
-                cursor.execute(query, (channel_id,))
-                result = cursor.fetchone()
-                
-            connection.close()
-            return dict(result) if result else None
+            ticket = await self.prisma.tickets.find_unique(where={'id': ticket_id})
+            return ticket.model_dump() if ticket else None
         except Exception as e:
-            logger.error(f"Erro ao buscar ticket por canal {channel_id}: {e}")
+            logger.error(f"Erro ao buscar ticket {ticket_id}: {e}")
+            return None
+
+    async def get_ticket_by_channel(self, channel_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            ticket = await self.prisma.tickets.find_first(
+                where={'channel_id': channel_id},
+                order={'id': 'desc'}
+            )
+            return ticket.model_dump() if ticket else None
+        except Exception as e:
+            logger.error(f"Erro ao buscar ticket do canal {channel_id}: {e}")
             return None
     
-    def get_user_latest_ticket(self, user_id: int) -> Optional[Dict[str, Any]]:
+    async def get_user_tickets(self, user_id: int, limit: int = 5) -> List[Dict[str, Any]]:
         try:
-            connection = self.get_connection()
-            if not connection:
-                return None
-            
-            with connection.cursor() as cursor:
-                query = """
-                    SELECT * FROM tickets 
-                    WHERE user_id = %s 
-                    ORDER BY id DESC 
-                    LIMIT 1;
-                """
-                cursor.execute(query, (user_id,))
-                result = cursor.fetchone()
-                
-            connection.close()
-            return dict(result) if result else None
-        except Exception as e:
-            logger.error(f"Erro ao buscar último ticket do usuário {user_id}: {e}")
-            return None
-    
-    def get_user_tickets(self, user_id: int, limit: int = 10) -> List[Dict[str, Any]]:
-        try:
-            connection = self.get_connection()
-            if not connection:
-                return []
-            
-            with connection.cursor() as cursor:
-                query = """
-                    SELECT * FROM tickets 
-                    WHERE user_id = %s 
-                    ORDER BY id DESC 
-                    LIMIT %s;
-                """
-                cursor.execute(query, (user_id, limit))
-                results = cursor.fetchall()
-                
-            connection.close()
-            return [dict(row) for row in results]
+             tickets = await self.prisma.tickets.find_many(
+                 where={'user_id': user_id},
+                 order={'created_at': 'desc'},
+                 take=limit
+             )
+             return [t.model_dump() for t in tickets]
         except Exception as e:
             logger.error(f"Erro ao buscar tickets do usuário {user_id}: {e}")
             return []
-    
-    def close_ticket(self, channel_id: int) -> bool:
+
+    async def get_user_latest_ticket(self, user_id: int) -> Optional[Dict[str, Any]]:
         try:
-            connection = self.get_connection()
-            if not connection:
-                return False
-            
-            with connection.cursor() as cursor:
-                query = """
-                    UPDATE tickets 
-                    SET status = 'closed', closed_at = CURRENT_TIMESTAMP
-                    WHERE channel_id = %s AND status != 'closed';
-                """
-                cursor.execute(query, (channel_id,))
-                connection.commit()
-                success = cursor.rowcount > 0
-                
-            connection.close()
-            logger.info(f"Ticket do canal {channel_id} {'fechado' if success else 'não encontrado/já fechado'}")
-            return success
+            ticket = await self.prisma.tickets.find_first(
+                where={'user_id': user_id},
+                order={'id': 'desc'}
+            )
+            return ticket.model_dump() if ticket else None
         except Exception as e:
-            logger.error(f"Erro ao fechar ticket do canal {channel_id}: {e}")
-            return False
-    
-    def reopen_ticket(self, channel_id: int, reason: str, description: str) -> Optional[int]:
+             logger.error(f"Erro ao buscar ultimo ticket do usuario {user_id}: {e}")
+             return None
+
+    async def close_ticket(self, channel_id: int) -> bool:
+         # Custom method to match the logic of just changing status?
+         try:
+             # Find ticket by channel first
+             ticket = await self.get_ticket_by_channel(channel_id)
+             if not ticket: return False
+             
+             await self.prisma.tickets.update(
+                 where={'id': ticket['id']},
+                 data={'status': 'closed', 'closed_at': datetime.now()}
+             )
+             logger.info(f"Ticket do canal {channel_id} fechado.")
+             return True
+         except Exception as e:
+             logger.error(f"Erro ao fechar ticket (status) channel {channel_id}: {e}")
+             return False
+
+    async def reopen_ticket(self, channel_id: int, reason: str, description: str) -> Optional[int]:
         try:
-            connection = self.get_connection()
-            if not connection:
-                return None
-            
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT id FROM tickets WHERE channel_id = %s ORDER BY id DESC LIMIT 1;", 
-                             (channel_id,))
-                result = cursor.fetchone()
-                
-                if not result:
-                    return None
-                
-                ticket_id = result['id']
-                
-                update_query = """
-                    UPDATE tickets 
-                    SET status = 'open', reason = %s, description = %s,
-                        closed_at = NULL, paused_at = NULL, paused_by = NULL,
-                        created_at = CURRENT_TIMESTAMP
-                    WHERE id = %s;
-                """
-                cursor.execute(update_query, (reason, description, ticket_id))
-                connection.commit()
-                
-            connection.close()
-            logger.info(f"Ticket {ticket_id} reaberto com novo motivo: {reason}")
-            return ticket_id
+             # Find latest ticket for channel
+             ticket = await self.get_ticket_by_channel(channel_id)
+             if not ticket: return None
+             
+             updated = await self.prisma.tickets.update(
+                 where={'id': ticket['id']},
+                 data={
+                     'status': 'open',
+                     'reason': reason,
+                     'description': description,
+                     'closed_at': None,
+                     'paused_at': None,
+                     'paused_by': None,
+                     'created_at': datetime.now() # Reset created_at? Original did this.
+                 }
+             )
+             logger.info(f"Ticket {ticket['id']} reaberto.")
+             return updated.id
         except Exception as e:
             logger.error(f"Erro ao reabrir ticket do canal {channel_id}: {e}")
             return None
-    
-    def pause_ticket(self, channel_id: int, paused_by: str) -> bool:
+
+    async def pause_ticket(self, channel_id: int, paused_by: str) -> bool:
         try:
-            connection = self.get_connection()
-            if not connection:
-                return False
-            
-            with connection.cursor() as cursor:
-                query = """
-                    UPDATE tickets 
-                    SET status = 'paused', paused_at = CURRENT_TIMESTAMP, paused_by = %s
-                    WHERE channel_id = %s AND status = 'open';
-                """
-                cursor.execute(query, (paused_by, channel_id))
-                connection.commit()
-                success = cursor.rowcount > 0
-                
-            connection.close()
-            return success
+             ticket = await self.get_ticket_by_channel(channel_id)
+             if not ticket or ticket['status'] != 'open': return False
+             
+             await self.prisma.tickets.update(
+                 where={'id': ticket['id']},
+                 data={
+                     'status': 'paused',
+                     'paused_at': datetime.now(),
+                     'paused_by': paused_by
+                 }
+             )
+             return True
         except Exception as e:
             logger.error(f"Erro ao pausar ticket do canal {channel_id}: {e}")
             return False
-    
-    def unpause_ticket(self, channel_id: int) -> bool:
+
+    async def unpause_ticket(self, channel_id: int) -> bool:
         try:
-            connection = self.get_connection()
-            if not connection:
-                return False
-            
-            with connection.cursor() as cursor:
-                query = """
-                    UPDATE tickets 
-                    SET status = 'open', paused_at = NULL, paused_by = NULL
-                    WHERE channel_id = %s AND status = 'paused';
-                """
-                cursor.execute(query, (channel_id,))
-                connection.commit()
-                success = cursor.rowcount > 0
-                
-            connection.close()
-            return success
+             ticket = await self.get_ticket_by_channel(channel_id)
+             if not ticket or ticket['status'] != 'paused': return False
+             
+             await self.prisma.tickets.update(
+                 where={'id': ticket['id']},
+                 data={
+                     'status': 'open',
+                     'paused_at': None,
+                     'paused_by': None
+                 }
+             )
+             return True
         except Exception as e:
-            logger.error(f"Erro ao despausar ticket do canal {channel_id}: {e}")
-            return False
-    
-    def get_open_tickets(self) -> List[Dict[str, Any]]:
+             logger.error(f"Erro ao despausar ticket do canal {channel_id}: {e}")
+             return False
+
+    async def get_open_tickets(self) -> List[Dict[str, Any]]:
         try:
-            connection = self.get_connection()
-            if not connection:
-                return []
-            
-            with connection.cursor() as cursor:
-                query = "SELECT * FROM tickets WHERE status = 'open' ORDER BY created_at ASC;"
-                cursor.execute(query)
-                results = cursor.fetchall()
-                
-            connection.close()
-            return [dict(row) for row in results]
+            tickets = await self.prisma.tickets.find_many(
+                where={'status': 'open'},
+                order={'created_at': 'asc'}
+            )
+            return [t.model_dump() for t in tickets]
         except Exception as e:
             logger.error(f"Erro ao buscar tickets abertos: {e}")
             return []
-    
-    def get_ticket_stats(self) -> Dict[str, int]:
+
+    async def get_ticket_stats(self) -> Dict[str, int]:
         try:
-            connection = self.get_connection()
-            if not connection:
-                return {}
-            
-            with connection.cursor() as cursor:
-                cursor.execute("""
-                    SELECT status, COUNT(*) as count 
-                    FROM tickets 
-                    GROUP BY status;
-                """)
-                status_counts = {row['status']: row['count'] for row in cursor.fetchall()}
-                
-                cursor.execute("SELECT COUNT(*) as total FROM tickets;")
-                total = cursor.fetchone()['total']
-                
-            connection.close()
-            
-            return {
-                'total': total,
-                'open': status_counts.get('open', 0),
-                'closed': status_counts.get('closed', 0),
-                'paused': status_counts.get('paused', 0)
-            }
+            total = await self.prisma.tickets.count()
+            open_count = await self.prisma.tickets.count(where={'status': 'open'})
+            closed_count = await self.prisma.tickets.count(where={'status': 'closed'})
+            paused_count = await self.prisma.tickets.count(where={'status': 'paused'})
+            return {"total": total, "open": open_count, "closed": closed_count, "paused": paused_count}
         except Exception as e:
-            logger.error(f"Erro ao buscar estatísticas: {e}")
-            return {}
+            logger.error(f"Erro ao buscar stats: {e}")
+            return {"total": 0, "open": 0, "closed": 0, "paused": 0}
+
+class StickerDatabaseManager:
+    """Gerenciador de banco de dados SQLite para o álbum de figurinhas."""
+    
+    def __init__(self, db_path="stickers.db"):
+        self.db_path = db_path
+
+    def init_database(self):
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS user_stickers (
+                        user_id INTEGER,
+                        sticker_id INTEGER,
+                        acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (user_id, sticker_id)
+                    )
+                """)
+                conn.commit()
+                logger.info("Tabela 'user_stickers' (SQLite) verificada/criada.")
+                return True
+        except Exception as e:
+            logger.error(f"Erro ao inicializar SQLite de figurinhas: {e}")
+            return False
+
+    def add_sticker(self, user_id: int, sticker_id: int) -> bool:
+        """Retorna True se adicionou, False se já tinha."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                # Tenta inserir, se já existe o par (user_id, sticker_id) falha silenciosamente (IGNORE) ou não insere
+                cursor.execute("INSERT OR IGNORE INTO user_stickers (user_id, sticker_id) VALUES (?, ?)", (user_id, sticker_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Erro ao adicionar figurinha: {e}")
+            return False
+
+    def get_user_stickers(self, user_id: int) -> List[int]:
+        """Retorna lista de IDs que o usuário tem."""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT sticker_id FROM user_stickers WHERE user_id = ?", (user_id,))
+                return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Erro ao buscar figurinhas do usuário: {e}")
+            return []
+
 
 # ==================================================================================================
 # UTILS (utils/helpers.py)
@@ -486,8 +428,8 @@ def schedule_ephemeral_deletion(
 async def close_ticket_channel(bot, channel: discord.TextChannel, auto_close: bool = False, skip_close_message: bool = False):
     """Fecha um canal de ticket garantindo que a mensagem de fechamento apareça."""
     try:
-        ticket = bot.db.get_ticket_by_channel(channel.id)
-        bot.db.close_ticket(channel.id)
+        ticket = await bot.db.get_ticket_by_channel(channel.id)
+        await bot.db.close_ticket(channel.id)
         
         embed = discord.Embed(
             title="🔒 TICKET FECHADO",
@@ -551,6 +493,109 @@ def format_timestamp(dt):
     return f"<t:{int(dt.timestamp())}:R>"
 
 # ==================================================================================================
+# GERADOR DE IMAGENS (Pillow)
+# ==================================================================================================
+
+class StickerGenerator:
+    @staticmethod
+    def generate_album_image(user_stickers: List[int], page: int = 1) -> io.BytesIO:
+        """Gera a imagem do álbum com as figurinhas que o usuário possui (Paginado)."""
+        
+        # Calcular quais figurinhas mostrar nesta página
+        all_ids = sorted(STICKERS_CONFIG.keys())
+        total_pages = (len(all_ids) + STICKERS_PER_PAGE - 1) // STICKERS_PER_PAGE
+        
+        if page < 1: page = 1
+        if page > total_pages: page = total_pages
+        
+        start_idx = (page - 1) * STICKERS_PER_PAGE
+        end_idx = start_idx + STICKERS_PER_PAGE
+        page_ids = all_ids[start_idx:end_idx]
+        
+        # Dimensões Totais
+        total_width = (STICKER_WIDTH * STICKER_COLS) + (STICKER_PADDING * (STICKER_COLS + 1))
+        # Ajuste de altura para caber cabeçalho e rodapé
+        total_height = (STICKER_HEIGHT * STICKER_ROWS) + (STICKER_PADDING * (STICKER_ROWS + 1)) + 120 
+        
+        # Criar Imagem Base
+        img = Image.new('RGB', (total_width, total_height), color=STICKER_BG_COLOR)
+        draw = ImageDraw.Draw(img)
+        
+        # Fontes
+        try:
+            font = ImageFont.truetype("arial.ttf", 40)
+            small_font = ImageFont.truetype("arial.ttf", 20)
+        except:
+            font = ImageFont.load_default()
+            small_font = ImageFont.load_default()
+            
+        # Cabeçalho (Texto Azul)
+        draw.text((total_width // 2, 50), f"UP Imóveis - Álbum 2025 (Pág {page}/{total_pages})", fill=(0, 0, 139), anchor="mm", font=font)
+        
+        # Desenhar Grid
+        assets_dir = os.path.join(os.path.dirname(__file__), 'assets', 'stickers')
+        
+        for idx, sticker_id in enumerate(page_ids):
+            data = STICKERS_CONFIG[sticker_id]
+            col = idx % STICKER_COLS
+            row = idx // STICKER_COLS
+            
+            x = STICKER_PADDING + (col * (STICKER_WIDTH + STICKER_PADDING))
+            y = 100 + (row * (STICKER_HEIGHT + STICKER_PADDING)) # 100 offset
+            
+            # Verificar se tem a figurinha
+            has_sticker = sticker_id in user_stickers
+            
+            # 1. Fundo do Slot (Borda Azul, Fundo mais claro)
+            draw.rectangle([x, y, x + STICKER_WIDTH, y + STICKER_HEIGHT], fill=(255, 250, 205), outline=(0, 0, 139), width=3) # LemonChiffon fill, DarkBlue outline
+            
+            # Área da Imagem (Marg. Interna)
+            img_x, img_y = x + 10, y + 10
+            img_w, img_h = STICKER_WIDTH - 20, STICKER_HEIGHT - 60 # Espaço p/ nome embaixo
+            
+            # Desenhar placeholder (fundo do slot da imagem)
+            draw.rectangle([img_x, img_y, img_x + img_w, img_y + img_h], fill=(255, 255, 255))
+
+            image_filename = data['image']
+            image_path = os.path.join(assets_dir, image_filename)
+            
+            if has_sticker:
+                if os.path.exists(image_path):
+                    try:
+                        with Image.open(image_path) as s_img:
+                            s_img = s_img.convert("RGBA")
+                            
+                            # Aspect Ratio Resizing (Contain)
+                            s_img.thumbnail((img_w, img_h), Image.Resampling.LANCZOS)
+                            
+                            # Centralizar
+                            paste_x = img_x + (img_w - s_img.width) // 2
+                            paste_y = img_y + (img_h - s_img.height) // 2
+                            
+                            img.paste(s_img, (paste_x, paste_y), s_img)
+                        
+                    except Exception as e:
+                        logger.error(f"Erro imagem {image_path}: {e}")
+                        draw.text((img_x + img_w//2, img_y + img_h//2), "Erro", fill=(255, 0, 0), anchor="mm")
+                else:
+                    draw.text((img_x + img_w//2, img_y + img_h//2), "Missing", fill=(255, 0, 0), anchor="mm")
+                
+                # Nome Colorido (Azul)
+                draw.text((x + STICKER_WIDTH // 2, y + STICKER_HEIGHT - 25), data['name'], fill=(0, 0, 139), anchor="mm", font=small_font)
+            else:
+                # Slot Vazio
+                draw.text((img_x + img_w // 2, img_y + img_h // 2), f"#{sticker_id}", fill=(150, 150, 150), anchor="mm", font=font)
+                draw.text((x + STICKER_WIDTH // 2, y + STICKER_HEIGHT - 25), "???", fill=(0, 0, 139), anchor="mm", font=small_font)
+
+        # Salvar em BytesIO
+        output = io.BytesIO()
+        img.save(output, format='PNG')
+        output.seek(0)
+        return output
+
+
+
+# ==================================================================================================
 # UI VIEWS (modules/ui/views.py + modals.py consolidated)
 # ==================================================================================================
 
@@ -567,7 +612,51 @@ class TicketChannelContext:
     channel: discord.TextChannel
     ticket_id: Optional[int]
     is_reopened: bool = False
+
     skip_intro_embed: bool = False
+
+class StickerRedeemView(discord.ui.View):
+    def __init__(self, sticker_id: int):
+        super().__init__(timeout=None)
+        self.sticker_id = sticker_id
+        
+    @discord.ui.button(label="Resgatar Figurinha 🧁", style=discord.ButtonStyle.success, custom_id=f"redeem_sticker") # Custom ID será dinâmico na persistência real, mas aqui usaremos hack ou factory
+    async def redeem(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Nota: para persistência real de views com custom_id dinâmico, precisaríamos de mais lógica.
+        # Simplificação: O custom_id do botão conterá o ID da figurinha, ex: "redeem_sticker_1"
+        # Mas como a classe é instanciada no comando, isso funciona enquanto o bot não reiniciar.
+        # Para persistência entre reboots, o ideal é usar custom_id fixo + split ou DynamicItems.
+        # Vou usar a abordagem simples assumindo que o comando cria a view.
+        
+        user_id = interaction.user.id
+        
+        # Simula adicionar figurinha
+        added = interaction.client.sticker_db.add_sticker(user_id, self.sticker_id)
+        
+        sticker_info = STICKERS_CONFIG.get(self.sticker_id)
+        name = sticker_info['name'] if sticker_info else "Desconhecido"
+
+        if added:
+             await interaction.response.send_message(f"🎉 **Parabéns!** Você resgatou a figurinha de **{name}**!", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"⚠️ Você já tem essa figurinha no álbum!", ephemeral=True)
+
+class DynamicStickerRedeemView(discord.ui.View):
+    """View para escutar botões de resgate persistentemente."""
+    def __init__(self, bot):
+        super().__init__(timeout=None)
+        self.bot = bot
+        
+    @discord.ui.button(label="Resgatar Figurinha 🧁", style=discord.ButtonStyle.success, custom_id="persistent_redeem_sticker")
+    async def redeem(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Hack: Extrair o sticker ID da mensagem ou embed? 
+        # Melhor abordagem: O comando simular_niver envia um custom_id único? Não, vamos simplificar.
+        # O comando simular_niver vai usar callbacks dinâmicos na memória por enquanto.
+        # Se precisar persistir, teríamos que mudar a arquitetura.
+        # Para '/simular_niver', vamos manter simples.
+        await interaction.response.send_message("❌ Este botão expirou ou precisa ser reconfigurado.", ephemeral=True)
+
+
 
 
 # Declaração forward para views
@@ -584,7 +673,7 @@ class TicketView(discord.ui.View):
     async def open_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             # Verificar se o usuário já tem um ticket aberto
-            user_tickets = interaction.client.db.get_user_tickets(interaction.user.id, 5)
+            user_tickets = await interaction.client.db.get_user_tickets(interaction.user.id, 5)
             open_tickets = [t for t in user_tickets if t['status'] == 'open']
             
             if open_tickets:
@@ -632,7 +721,7 @@ class ReopenTicketView(discord.ui.View):
     )
     async def reopen_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            ticket = interaction.client.db.get_ticket_by_channel(interaction.channel.id)
+            ticket = await interaction.client.db.get_ticket_by_channel(interaction.channel.id)
             if not ticket:
                 await interaction.response.send_message("❌ Este não é um canal de ticket válido.", ephemeral=True)
                 return
@@ -733,12 +822,12 @@ class DescriptionModal(discord.ui.Modal):
             await interaction.followup.send("❌ Ocorreu um erro no processamento.", ephemeral=True)
 
     async def _prepare_channel(self, interaction, guild, user) -> Optional[TicketChannelContext]:
-        latest_ticket = interaction.client.db.get_user_latest_ticket(user.id)
+        latest_ticket = await interaction.client.db.get_user_latest_ticket(user.id)
         if latest_ticket:
             channel = guild.get_channel(latest_ticket["channel_id"])
             if channel:
                 # Reopen Logic inline
-                ticket_id = interaction.client.db.reopen_ticket(channel.id, self.reason, self.description.value)
+                ticket_id = await interaction.client.db.reopen_ticket(channel.id, self.reason, self.description.value)
                 if not ticket_id: return None
                 
                 embed = self._build_reopen_embed(user)
@@ -771,7 +860,7 @@ class DescriptionModal(discord.ui.Modal):
         channel_name = f"💻┃{user.name.lower()}"
         channel = await category.create_text_channel(name=channel_name, overwrites=overwrites)
         
-        ticket_id = interaction.client.db.create_ticket(
+        ticket_id = await interaction.client.db.create_ticket(
             user_id=user.id, user_name=str(user), channel_id=channel.id,
             reason=self.reason, description=self.description.value,
         )
@@ -833,6 +922,64 @@ class CloseStatusSelect(discord.ui.Select):
             logger.error(f"Erro no select close: {e}")
             await interaction.response.send_message("❌ Erro.", ephemeral=True)
 
+class AlbumPaginationView(discord.ui.View):
+
+    def __init__(self, user_id, current_page, total_pages, stickers_map):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.current_page = current_page
+        self.total_pages = total_pages
+        self.stickers_map = stickers_map # Dict dos que o usuário tem
+        
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_button.disabled = (self.current_page <= 1)
+        self.next_button.disabled = (self.current_page >= self.total_pages)
+        self.count_button.label = f"{self.current_page}/{self.total_pages}"
+
+    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_page_change(interaction, -1)
+
+    @discord.ui.button(label="1/1", style=discord.ButtonStyle.secondary, disabled=True)
+    async def count_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        pass # Apenas display
+
+    @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_page_change(interaction, 1)
+
+    async def handle_page_change(self, interaction, delta):
+        if interaction.user.id != self.user_id:
+            return await interaction.response.send_message("❌ Esse álbum não é seu.", ephemeral=True)
+        
+        # Calcular nova página e validar
+        new_page = self.current_page + delta
+        if new_page < 1 or new_page > self.total_pages:
+            return # Não faz nada se tentar sair dos limites
+            
+        self.current_page = new_page
+        self.update_buttons()
+        
+        await interaction.response.defer()
+        
+        # Gerar nova imagem
+        loop = asyncio.get_running_loop()
+        image_bytes = await loop.run_in_executor(None, StickerGenerator.generate_album_image, self.stickers_map, self.current_page)
+        
+        filename = f"album_p{self.current_page}.png"
+        file = discord.File(image_bytes, filename=filename)
+        
+        embed = interaction.message.embeds[0]
+        # Forçar atualização da imagem limpando e setando novamente
+        embed.set_image(url=f"attachment://{filename}")
+        embed.title = f"📒 Álbum de {interaction.user.display_name} (Pág. {self.current_page})"
+        
+        # Usar attachments=[file] para substituir a imagem anterior explicitamente
+        await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
+
+
 class PauseDescriptionModal(discord.ui.Modal):
     def __init__(self, ticket: dict, status: str):
         self.ticket = ticket
@@ -874,7 +1021,7 @@ class CloseStatusView(discord.ui.View):
 
 # ==================================================================================================
 # UTILS DE SETUP (localizados aqui para acessar as Views)
-# ==================================================================================================
+# =================================================================================================G
 
 async def setup_tickets_in_channel(bot, channel: discord.TextChannel):
     """Configura o sistema de tickets em um canal específico."""
@@ -935,7 +1082,7 @@ class TicketCommands(commands.Cog):
     async def close_ticket_with_status(self, interaction: discord.Interaction):
         try:
             channel = interaction.channel
-            ticket = self.bot.db.get_ticket_by_channel(channel.id)
+            ticket = await self.bot.db.get_ticket_by_channel(channel.id)
 
             if not ticket:
                 await interaction.response.send_message("❌ Não é um canal de ticket.", ephemeral=True)
@@ -1159,60 +1306,142 @@ class AlertCommands(commands.Cog):
             logger.error(f"Erro no update_alert: {e}")
             await interaction.response.send_message("❌ Erro interno.", ephemeral=True)
 
+class StickerCommands(commands.Cog):
+    """Comandos do Álbum de Figurinhas."""
+    
+    def __init__(self, bot):
+        self.bot = bot
+    
+    @discord.app_commands.command(name="simular_niver", description="Simula um aniversário para liberar figurinha (Admin)")
+    @discord.app_commands.describe(sticker_id="ID da figurinha (1-12)")
+    async def simular_niver(self, interaction: discord.Interaction, sticker_id: int):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("❌ Apenas administradores.", ephemeral=True)
+            return
+
+        if sticker_id not in STICKERS_CONFIG:
+            await interaction.response.send_message("❌ ID de figurinha inválido.", ephemeral=True)
+            return
+            
+        sticker_data = STICKERS_CONFIG[sticker_id]
+        
+        embed = discord.Embed(
+            title=f"🎉 Feliz Aniversário, {sticker_data['name']}!",
+            description="Clique no botão abaixo para resgatar sua figurinha exclusiva do álbum!",
+            color=0xFFD700
+        )
+        
+        # Tentar carregar imagem para enviar junto (attachment)
+        assets_dir = os.path.join(os.path.dirname(__file__), 'assets', 'stickers')
+        image_path = os.path.join(assets_dir, sticker_data['image'])
+        file = None
+        if os.path.exists(image_path):
+            file = discord.File(image_path, filename="sticker.png")
+            embed.set_image(url="attachment://sticker.png")
+            
+        view = StickerRedeemView(sticker_id)
+        
+        if file:
+            await interaction.response.send_message(embed=embed, file=file, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+
+    @discord.app_commands.command(name="album", description="Ver seu álbum de figurinhas")
+    async def album(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        
+        user_stickers = self.bot.sticker_db.get_user_stickers(interaction.user.id)
+        
+        try:
+            # Calcular páginas
+            all_ids = STICKERS_CONFIG.keys()
+            total_pages = (len(all_ids) + STICKERS_PER_PAGE - 1) // STICKERS_PER_PAGE
+            if total_pages < 1: total_pages = 1
+            
+            # Gerar imagem em thread separada
+            loop = asyncio.get_running_loop()
+            image_bytes = await loop.run_in_executor(None, StickerGenerator.generate_album_image, user_stickers, 1)
+            
+            file = discord.File(image_bytes, filename="album.png")
+            
+            total = len(STICKERS_CONFIG)
+            owned = len(user_stickers)
+            percent = (owned / total) * 100
+            
+            embed = discord.Embed(
+                title=f"📒 Álbum de {interaction.user.display_name}",
+                description=f"Progresso: **{owned}/{total}** ({percent:.1f}%)",
+                color=0x3498db
+            )
+            embed.set_image(url="attachment://album.png")
+            
+            view = AlbumPaginationView(interaction.user.id, 1, total_pages, user_stickers)
+            
+            await interaction.followup.send(embed=embed, file=file, view=view)
+            
+        except Exception as e:
+            logger.error(f"Erro ao gerar álbum: {e}")
+            await interaction.followup.send("❌ Erro ao gerar álbum.")
+
+
 # ==================================================================================================
 # BOT PRINCIPAL (app.py)
 # ==================================================================================================
 
-# Intents necessários
-intents = discord.Intents.default()
-intents.message_content = True
-
 class OptimizedTicketBot(commands.Bot):
-    """Bot otimizado para hospedagem dedicada no BlazeHosting."""
-    
     def __init__(self):
-        super().__init__(
-            command_prefix=BOT_CONFIG['command_prefix'],
-            intents=intents,
-            help_command=None
-        )
-        self.db = DatabaseManager()
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        intents.guilds = True  # Ensure guild intents are enabled
+        
+        super().__init__(command_prefix=BOT_CONFIG['command_prefix'], intents=intents)
+        
+        self.prisma = Prisma() # Instancia cliente Prisma
+        self.db = DatabaseManager(self.prisma) # Passa para o Manager
+        self.sticker_db = StickerDatabaseManager() 
         self.startup_time = datetime.now()
         self._health_server_started = False
         self.health_server_port = None
         
     async def setup_hook(self):
-        """Configuração do bot."""
         try:
-            self._print_startup_banner()
-            logger.info("Iniciando setup...")
+            # Conexão Prisma
+            await self.prisma.connect()
+            logger.info("Prisma conectado.")
             
-            if not self.db.init_database():
-                logger.error("Falha na conexão com banco - continuando sem DB")
-            else:
-                logger.info("Banco conectado")
-            
+            # Inicializar SQLite Stickers
+            if self.sticker_db.init_database():
+                logger.info("SQLite Stickers inicializado")
+
+            # Cogs
             await self.add_cog(TicketCommands(self))
             await self.add_cog(AlertCommands(self))
-            
+            await self.add_cog(StickerCommands(self))
+
+            # Sync Comandos
             logger.info("Sincronizando comandos...")
-            try:
-                synced = await self.tree.sync()
-                logger.info(f"{len(synced)} comandos sincronizados")
-            except Exception as e:
-                logger.warning(f"Erro sync: {e}")
+            await self.tree.sync()
             
+            # Views
             logger.info("Adicionando views persistentes...")
             self.add_view(TicketView())
             self.add_view(TicketControlView())
             self.add_view(ReopenTicketView())
             
+            # Tasks e Servidor
             self.auto_close_tickets.start()
             self.ensure_health_server()
             logger.info("✅ Setup concluído!")
             
         except Exception as e:
             logger.error(f"Erro setup: {e}")
+
+    async def close(self):
+        if self.prisma.is_connected():
+            await self.prisma.disconnect()
+            logger.info("Prisma desconectado.")
+        await super().close()
     
     async def on_ready(self):
         try:
@@ -1225,7 +1454,7 @@ class OptimizedTicketBot(commands.Bot):
     @tasks.loop(minutes=BOT_CONFIG['auto_close_check_minutes'])
     async def auto_close_tickets(self):
         try:
-            open_tickets = self.db.get_open_tickets()
+            open_tickets = await self.db.get_open_tickets()
             if not open_tickets: return
                 
             now = datetime.now()

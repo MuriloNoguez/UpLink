@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-py"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model tickets {
+  id          Int       @id @default(autoincrement())
+  user_id     BigInt
+  user_name   String    @db.VarChar(255)
+  channel_id  BigInt    @unique
+  reason      String    @db.VarChar(255)
+  description String?
+  status      String?   @default("open") @db.VarChar(20)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  closed_at   DateTime? @db.Timestamp(6)
+  paused_at   DateTime? @db.Timestamp(6)
+  paused_by   String?   @db.VarChar(255)
+
+  @@index([channel_id], map: "idx_tickets_channel_id")
+  @@index([created_at], map: "idx_tickets_created_at")
+  @@index([status], map: "idx_tickets_status")
+  @@index([user_id], map: "idx_tickets_user_id")
+}
