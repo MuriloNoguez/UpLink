@@ -21,10 +21,8 @@ from discord.ext import commands, tasks
 from discord import app_commands
 from dotenv import load_dotenv
 from prisma import Prisma
-import sqlite3
 import io
 import random
-from PIL import Image, ImageDraw, ImageFont
 
 
 
@@ -105,30 +103,16 @@ TICKET_REASONS = [
 
 # ==================================================================================================
 # ==================================================================================================
-# ID do aniversariante -> {nome, arquivo_imagem}
-# Imagens devem estar em ./assets/stickers/
-STICKERS_CONFIG = {
-    1: {'name': 'Teste', 'image': '1.png'}, # Configuração de Teste
-    2: {'name': 'Maria', 'image': 'maria.png'},
-    3: {'name': 'Pedro', 'image': 'pedro.png'},
-    4: {'name': 'Ana', 'image': 'ana.png'},
-    5: {'name': 'Lucas', 'image': 'lucas.png'},
-    6: {'name': 'Julia', 'image': 'julia.png'},
-    7: {'name': 'Marcos', 'image': 'marcos.png'},
-    8: {'name': 'Fernanda', 'image': 'fernanda.png'},
-    9: {'name': 'Gabriel', 'image': 'gabriel.png'},
-    10: {'name': 'Larissa', 'image': 'larissa.png'},
-    11: {'name': 'Rafael', 'image': 'rafael.png'},
-    12: {'name': 'Camila', 'image': 'camila.png'},
-    24: {'name': 'Camila 2', 'image': 'camila.png'} # Exemplo para 2 paginas
-}
-STICKER_COLS = 3
-STICKER_ROWS = 2 # 6 por página
-STICKERS_PER_PAGE = STICKER_COLS * STICKER_ROWS
-STICKER_WIDTH = 250 # Um pouco maior
-STICKER_HEIGHT = 300
-STICKER_PADDING = 30
-STICKER_BG_COLOR = (255, 223, 0) # Amarelo Ouro
+# ==================================================================================================
+# CONFIGURAÇÃO DE ANIVERSÁRIOS
+# ==================================================================================================
+BIRTHDAY_GIFS = [
+    "https://i.pinimg.com/originals/a0/05/0b/a0050b555e8bc803006d64998df96102.gif",
+    "https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExbnZ4cmk1ZmV4eG14eG14eG14eG14eG14eG14eG14eG14eC9lcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/LvtKSk01C8m4/giphy.gif",
+    "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExb3NqM3NqM3NqM3NqM3NqM3NqM3NqM3NqM3NqM3NqM3M9Zw/SwIMZUJE3ZPpHAfTC4/giphy.gif",
+    "https://media.tenor.com/P0G_M0s0d8oAAAAC/happy-birthday.gif",
+    "https://media.tenor.com/I2C36531QzYAAAAC/happy-birthday-to-you.gif"
+]
 
 
 
@@ -330,54 +314,54 @@ class DatabaseManager:
             logger.error(f"Erro ao buscar stats: {e}")
             return {"total": 0, "open": 0, "closed": 0, "paused": 0}
 
-class StickerDatabaseManager:
-    """Gerenciador de banco de dados SQLite para o álbum de figurinhas."""
-    
-    def __init__(self, db_path="stickers.db"):
-        self.db_path = db_path
-
-    def init_database(self):
+    async def add_birthday(self, user_id: int, day: int, month: int) -> bool:
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS user_stickers (
-                        user_id INTEGER,
-                        sticker_id INTEGER,
-                        acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (user_id, sticker_id)
-                    )
-                """)
-                conn.commit()
-                logger.info("Tabela 'user_stickers' (SQLite) verificada/criada.")
-                return True
+            await self.prisma.birthday.upsert(
+                where={'user_id': user_id},
+                data={
+                    'create': {'user_id': user_id, 'day': day, 'month': month},
+                    'update': {'day': day, 'month': month}
+                }
+            )
+            return True
         except Exception as e:
-            logger.error(f"Erro ao inicializar SQLite de figurinhas: {e}")
+            logger.error(f"Erro ao adicionar aniversario: {e}")
             return False
 
-    def add_sticker(self, user_id: int, sticker_id: int) -> bool:
-        """Retorna True se adicionou, False se já tinha."""
+    async def remove_birthday(self, user_id: int) -> bool:
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                # Tenta inserir, se já existe o par (user_id, sticker_id) falha silenciosamente (IGNORE) ou não insere
-                cursor.execute("INSERT OR IGNORE INTO user_stickers (user_id, sticker_id) VALUES (?, ?)", (user_id, sticker_id))
-                conn.commit()
-                return cursor.rowcount > 0
+            await self.prisma.birthday.delete(where={'user_id': user_id})
+            return True
         except Exception as e:
-            logger.error(f"Erro ao adicionar figurinha: {e}")
             return False
 
-    def get_user_stickers(self, user_id: int) -> List[int]:
-        """Retorna lista de IDs que o usuário tem."""
+    async def get_birthdays_by_date(self, day: int, month: int) -> List[int]:
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT sticker_id FROM user_stickers WHERE user_id = ?", (user_id,))
-                return [row[0] for row in cursor.fetchall()]
+            birthdays = await self.prisma.birthday.find_many(
+                where={'day': day, 'month': month}
+            )
+            return [int(b.user_id) for b in birthdays]
         except Exception as e:
-            logger.error(f"Erro ao buscar figurinhas do usuário: {e}")
+            logger.error(f"Erro ao buscar aniversariantes: {e}")
             return []
+    
+    async def get_all_birthdays(self) -> List[Dict[str, Any]]:
+        try:
+            birthdays = await self.prisma.birthday.find_many()
+            return [{'user_id': int(b.user_id), 'day': b.day, 'month': b.month} for b in birthdays]
+        except Exception as e:
+             logger.error(f"Erro ao listar todos aniversarios: {e}")
+             return []
+
+    async def get_birthday(self, user_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            birthday = await self.prisma.birthday.find_unique(where={'user_id': user_id})
+            if birthday:
+                return {'user_id': int(birthday.user_id), 'day': birthday.day, 'month': birthday.month}
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao buscar aniversario do usuario {user_id}: {e}")
+            return None
 
 
 # ==================================================================================================
@@ -492,106 +476,7 @@ def format_timestamp(dt):
         dt = datetime.fromisoformat(dt)
     return f"<t:{int(dt.timestamp())}:R>"
 
-# ==================================================================================================
-# GERADOR DE IMAGENS (Pillow)
-# ==================================================================================================
 
-class StickerGenerator:
-    @staticmethod
-    def generate_album_image(user_stickers: List[int], page: int = 1) -> io.BytesIO:
-        """Gera a imagem do álbum com as figurinhas que o usuário possui (Paginado)."""
-        
-        # Calcular quais figurinhas mostrar nesta página
-        all_ids = sorted(STICKERS_CONFIG.keys())
-        total_pages = (len(all_ids) + STICKERS_PER_PAGE - 1) // STICKERS_PER_PAGE
-        
-        if page < 1: page = 1
-        if page > total_pages: page = total_pages
-        
-        start_idx = (page - 1) * STICKERS_PER_PAGE
-        end_idx = start_idx + STICKERS_PER_PAGE
-        page_ids = all_ids[start_idx:end_idx]
-        
-        # Dimensões Totais
-        total_width = (STICKER_WIDTH * STICKER_COLS) + (STICKER_PADDING * (STICKER_COLS + 1))
-        # Ajuste de altura para caber cabeçalho e rodapé
-        total_height = (STICKER_HEIGHT * STICKER_ROWS) + (STICKER_PADDING * (STICKER_ROWS + 1)) + 120 
-        
-        # Criar Imagem Base
-        img = Image.new('RGB', (total_width, total_height), color=STICKER_BG_COLOR)
-        draw = ImageDraw.Draw(img)
-        
-        # Fontes
-        try:
-            font = ImageFont.truetype("arial.ttf", 40)
-            small_font = ImageFont.truetype("arial.ttf", 20)
-        except:
-            font = ImageFont.load_default()
-            small_font = ImageFont.load_default()
-            
-        # Cabeçalho (Texto Azul)
-        draw.text((total_width // 2, 50), f"UP Imóveis - Álbum 2025 (Pág {page}/{total_pages})", fill=(0, 0, 139), anchor="mm", font=font)
-        
-        # Desenhar Grid
-        assets_dir = os.path.join(os.path.dirname(__file__), 'assets', 'stickers')
-        
-        for idx, sticker_id in enumerate(page_ids):
-            data = STICKERS_CONFIG[sticker_id]
-            col = idx % STICKER_COLS
-            row = idx // STICKER_COLS
-            
-            x = STICKER_PADDING + (col * (STICKER_WIDTH + STICKER_PADDING))
-            y = 100 + (row * (STICKER_HEIGHT + STICKER_PADDING)) # 100 offset
-            
-            # Verificar se tem a figurinha
-            has_sticker = sticker_id in user_stickers
-            
-            # 1. Fundo do Slot (Borda Azul, Fundo mais claro)
-            draw.rectangle([x, y, x + STICKER_WIDTH, y + STICKER_HEIGHT], fill=(255, 250, 205), outline=(0, 0, 139), width=3) # LemonChiffon fill, DarkBlue outline
-            
-            # Área da Imagem (Marg. Interna)
-            img_x, img_y = x + 10, y + 10
-            img_w, img_h = STICKER_WIDTH - 20, STICKER_HEIGHT - 60 # Espaço p/ nome embaixo
-            
-            # Desenhar placeholder (fundo do slot da imagem)
-            draw.rectangle([img_x, img_y, img_x + img_w, img_y + img_h], fill=(255, 255, 255))
-
-            image_filename = data['image']
-            image_path = os.path.join(assets_dir, image_filename)
-            
-            if has_sticker:
-                if os.path.exists(image_path):
-                    try:
-                        with Image.open(image_path) as s_img:
-                            s_img = s_img.convert("RGBA")
-                            
-                            # Aspect Ratio Resizing (Contain)
-                            s_img.thumbnail((img_w, img_h), Image.Resampling.LANCZOS)
-                            
-                            # Centralizar
-                            paste_x = img_x + (img_w - s_img.width) // 2
-                            paste_y = img_y + (img_h - s_img.height) // 2
-                            
-                            img.paste(s_img, (paste_x, paste_y), s_img)
-                        
-                    except Exception as e:
-                        logger.error(f"Erro imagem {image_path}: {e}")
-                        draw.text((img_x + img_w//2, img_y + img_h//2), "Erro", fill=(255, 0, 0), anchor="mm")
-                else:
-                    draw.text((img_x + img_w//2, img_y + img_h//2), "Missing", fill=(255, 0, 0), anchor="mm")
-                
-                # Nome Colorido (Azul)
-                draw.text((x + STICKER_WIDTH // 2, y + STICKER_HEIGHT - 25), data['name'], fill=(0, 0, 139), anchor="mm", font=small_font)
-            else:
-                # Slot Vazio
-                draw.text((img_x + img_w // 2, img_y + img_h // 2), f"#{sticker_id}", fill=(150, 150, 150), anchor="mm", font=font)
-                draw.text((x + STICKER_WIDTH // 2, y + STICKER_HEIGHT - 25), "???", fill=(0, 0, 139), anchor="mm", font=small_font)
-
-        # Salvar em BytesIO
-        output = io.BytesIO()
-        img.save(output, format='PNG')
-        output.seek(0)
-        return output
 
 
 
@@ -615,46 +500,7 @@ class TicketChannelContext:
 
     skip_intro_embed: bool = False
 
-class StickerRedeemView(discord.ui.View):
-    def __init__(self, sticker_id: int):
-        super().__init__(timeout=None)
-        self.sticker_id = sticker_id
-        
-    @discord.ui.button(label="Resgatar Figurinha 🧁", style=discord.ButtonStyle.success, custom_id=f"redeem_sticker") # Custom ID será dinâmico na persistência real, mas aqui usaremos hack ou factory
-    async def redeem(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Nota: para persistência real de views com custom_id dinâmico, precisaríamos de mais lógica.
-        # Simplificação: O custom_id do botão conterá o ID da figurinha, ex: "redeem_sticker_1"
-        # Mas como a classe é instanciada no comando, isso funciona enquanto o bot não reiniciar.
-        # Para persistência entre reboots, o ideal é usar custom_id fixo + split ou DynamicItems.
-        # Vou usar a abordagem simples assumindo que o comando cria a view.
-        
-        user_id = interaction.user.id
-        
-        # Simula adicionar figurinha
-        added = interaction.client.sticker_db.add_sticker(user_id, self.sticker_id)
-        
-        sticker_info = STICKERS_CONFIG.get(self.sticker_id)
-        name = sticker_info['name'] if sticker_info else "Desconhecido"
 
-        if added:
-             await interaction.response.send_message(f"🎉 **Parabéns!** Você resgatou a figurinha de **{name}**!", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"⚠️ Você já tem essa figurinha no álbum!", ephemeral=True)
-
-class DynamicStickerRedeemView(discord.ui.View):
-    """View para escutar botões de resgate persistentemente."""
-    def __init__(self, bot):
-        super().__init__(timeout=None)
-        self.bot = bot
-        
-    @discord.ui.button(label="Resgatar Figurinha 🧁", style=discord.ButtonStyle.success, custom_id="persistent_redeem_sticker")
-    async def redeem(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Hack: Extrair o sticker ID da mensagem ou embed? 
-        # Melhor abordagem: O comando simular_niver envia um custom_id único? Não, vamos simplificar.
-        # O comando simular_niver vai usar callbacks dinâmicos na memória por enquanto.
-        # Se precisar persistir, teríamos que mudar a arquitetura.
-        # Para '/simular_niver', vamos manter simples.
-        await interaction.response.send_message("❌ Este botão expirou ou precisa ser reconfigurado.", ephemeral=True)
 
 
 
@@ -922,62 +768,7 @@ class CloseStatusSelect(discord.ui.Select):
             logger.error(f"Erro no select close: {e}")
             await interaction.response.send_message("❌ Erro.", ephemeral=True)
 
-class AlbumPaginationView(discord.ui.View):
 
-    def __init__(self, user_id, current_page, total_pages, stickers_map):
-        super().__init__(timeout=180)
-        self.user_id = user_id
-        self.current_page = current_page
-        self.total_pages = total_pages
-        self.stickers_map = stickers_map # Dict dos que o usuário tem
-        
-        self.update_buttons()
-
-    def update_buttons(self):
-        self.prev_button.disabled = (self.current_page <= 1)
-        self.next_button.disabled = (self.current_page >= self.total_pages)
-        self.count_button.label = f"{self.current_page}/{self.total_pages}"
-
-    @discord.ui.button(label="⬅️", style=discord.ButtonStyle.primary)
-    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_page_change(interaction, -1)
-
-    @discord.ui.button(label="1/1", style=discord.ButtonStyle.secondary, disabled=True)
-    async def count_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        pass # Apenas display
-
-    @discord.ui.button(label="➡️", style=discord.ButtonStyle.primary)
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.handle_page_change(interaction, 1)
-
-    async def handle_page_change(self, interaction, delta):
-        if interaction.user.id != self.user_id:
-            return await interaction.response.send_message("❌ Esse álbum não é seu.", ephemeral=True)
-        
-        # Calcular nova página e validar
-        new_page = self.current_page + delta
-        if new_page < 1 or new_page > self.total_pages:
-            return # Não faz nada se tentar sair dos limites
-            
-        self.current_page = new_page
-        self.update_buttons()
-        
-        await interaction.response.defer()
-        
-        # Gerar nova imagem
-        loop = asyncio.get_running_loop()
-        image_bytes = await loop.run_in_executor(None, StickerGenerator.generate_album_image, self.stickers_map, self.current_page)
-        
-        filename = f"album_p{self.current_page}.png"
-        file = discord.File(image_bytes, filename=filename)
-        
-        embed = interaction.message.embeds[0]
-        # Forçar atualização da imagem limpando e setando novamente
-        embed.set_image(url=f"attachment://{filename}")
-        embed.title = f"📒 Álbum de {interaction.user.display_name} (Pág. {self.current_page})"
-        
-        # Usar attachments=[file] para substituir a imagem anterior explicitamente
-        await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
 
 
 class PauseDescriptionModal(discord.ui.Modal):
@@ -1306,82 +1097,158 @@ class AlertCommands(commands.Cog):
             logger.error(f"Erro no update_alert: {e}")
             await interaction.response.send_message("❌ Erro interno.", ephemeral=True)
 
-class StickerCommands(commands.Cog):
-    """Comandos do Álbum de Figurinhas."""
+class BirthdayCommands(commands.Cog):
+    """Comandos para gerenciamento de Aniversários."""
     
     def __init__(self, bot):
         self.bot = bot
-    
-    @discord.app_commands.command(name="simular_niver", description="Simula um aniversário para liberar figurinha (Admin)")
-    @discord.app_commands.describe(sticker_id="ID da figurinha (1-12)")
-    async def simular_niver(self, interaction: discord.Interaction, sticker_id: int):
+        self.check_birthdays.start()
+        self.last_check_date = None
+
+    def cog_unload(self):
+        self.check_birthdays.cancel()
+
+    @discord.app_commands.command(name="niver", description="Gerenciar aniversários")
+    @discord.app_commands.describe(
+        acao="Ação a realizar: cadastrar, remover, ver",
+        dia="Dia do nascimento (1-31)",
+        mes="Mês do nascimento (1-12)",
+        usuario="Usuário alvo (Opcional - Apenas Moderadores)"
+    )
+    @discord.app_commands.choices(acao=[
+        discord.app_commands.Choice(name="Cadastrar", value="cadastrar"),
+        discord.app_commands.Choice(name="Remover", value="remover"),
+        discord.app_commands.Choice(name="Ver", value="ver")
+    ])
+    async def niver(self, interaction: discord.Interaction, acao: str, dia: int = None, mes: int = None, usuario: discord.User = None):
+        target_user = usuario or interaction.user
+        
+        # Verificar permissão se for para outro usuário
+        if usuario and usuario != interaction.user:
+             if not interaction.user.guild_permissions.manage_messages:
+                 await interaction.response.send_message("❌ Apenas moderadores podem gerenciar aniversários de outros.", ephemeral=True)
+                 return
+
+        if acao == "cadastrar":
+            if not dia or not mes:
+                await interaction.response.send_message("❌ Informe o dia e o mês!", ephemeral=True)
+                return
+            
+            try:
+                datetime(2024, mes, dia) # Validação simples
+            except ValueError:
+                await interaction.response.send_message("❌ Data incorreta!", ephemeral=True)
+                return
+
+            success = await self.bot.db.add_birthday(target_user.id, dia, mes)
+            
+            if success:
+                msg = f"✅ Aniversário cadastrado para **{dia:02d}/{mes:02d}**"
+                if target_user.id != interaction.user.id:
+                    msg += f" (Usuário: {target_user.mention})"
+                
+                # Try/Except para lidar com interação já respondida (caso raro, mas preventivo)
+                try:
+                    await interaction.response.send_message(msg, ephemeral=True)
+                except discord.InteractionResponded:
+                    await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Erro ao salvar no banco.", ephemeral=True)
+
+        elif acao == "remover":
+            await self.bot.db.remove_birthday(target_user.id)
+            msg = "✅ Aniversário removido."
+            if target_user.id != interaction.user.id:
+                msg = f"✅ Aniversário de {target_user.mention} removido."
+            await interaction.response.send_message(msg, ephemeral=True)
+
+        elif acao == "ver":
+             bday = await self.bot.db.get_birthday(target_user.id)
+             if bday:
+                 if target_user.id == interaction.user.id:
+                     msg = f"🎂 Seu aniversário é dia **{bday['day']:02d}/{bday['month']:02d}**."
+                 else:
+                     msg = f"🎂 O aniversário de {target_user.mention} é dia **{bday['day']:02d}/{bday['month']:02d}**."
+                 
+                 await interaction.response.send_message(msg, ephemeral=True)
+             else:
+                 msg = "❌ Você não tem aniversário cadastrado."
+                 if target_user.id != interaction.user.id:
+                     msg = f"❌ {target_user.mention} não tem aniversário cadastrado."
+                 await interaction.response.send_message(msg, ephemeral=True)
+
+    @discord.app_commands.command(name="simular_niver", description="Simula um anúncio de aniversário (Admin)")
+    @discord.app_commands.describe(usuario="Usuário para simular (Opcional)")
+    async def simular_niver(self, interaction: discord.Interaction, usuario: discord.User = None):
         if not interaction.user.guild_permissions.administrator:
             await interaction.response.send_message("❌ Apenas administradores.", ephemeral=True)
             return
 
-        if sticker_id not in STICKERS_CONFIG:
-            await interaction.response.send_message("❌ ID de figurinha inválido.", ephemeral=True)
-            return
-            
-        sticker_data = STICKERS_CONFIG[sticker_id]
+        target = usuario or interaction.user
+        
+        # Escolher GIF
+        gif_url = random.choice(BIRTHDAY_GIFS) if BIRTHDAY_GIFS else None
         
         embed = discord.Embed(
-            title=f"🎉 Feliz Aniversário, {sticker_data['name']}!",
-            description="Clique no botão abaixo para resgatar sua figurinha exclusiva do álbum!",
-            color=0xFFD700
+            title=f"🎉 Feliz Aniversário, {target.display_name}! 🎂",
+                description=f"Hoje é o dia de celebrar mais um ano de vida de {target.mention}!\n\n**Parabéns! Que seu dia seja incrível!** 🥳🎈",
+                color=0xFFD700
         )
+        if gif_url:
+            embed.set_image(url=gif_url)
         
-        # Tentar carregar imagem para enviar junto (attachment)
-        assets_dir = os.path.join(os.path.dirname(__file__), 'assets', 'stickers')
-        image_path = os.path.join(assets_dir, sticker_data['image'])
-        file = None
-        if os.path.exists(image_path):
-            file = discord.File(image_path, filename="sticker.png")
-            embed.set_image(url="attachment://sticker.png")
-            
-        view = StickerRedeemView(sticker_id)
-        
-        if file:
-            await interaction.response.send_message(embed=embed, file=file, view=view)
-        else:
-            await interaction.response.send_message(embed=embed, view=view)
+        # Envia no canal onde o comando foi usado
+        await interaction.response.send_message(content=f"@everyone Hoje é o dia de {target.mention}! 🎉", embed=embed)
 
-    @discord.app_commands.command(name="album", description="Ver seu álbum de figurinhas")
-    async def album(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+    @tasks.loop(minutes=1)
+    async def check_birthdays(self):
+        # A cada minuto, verifica se é 08:30 (horario local do servidor)
+        now = datetime.now()
         
-        user_stickers = self.bot.sticker_db.get_user_stickers(interaction.user.id)
+        # Evitar múltiplas execuções no mesmo dia/horário se o loop correr rápido (improvável com minutes=1, mas seguro)
+        if self.last_check_date == now.date() and getattr(self, "last_check_hour", -1) == 8:
+             # Já rodou hoje às 8?
+             # Se rodou às 8:30, não roda mais.
+             # Mas precisamos garantir que é exatamente 8:30
+             pass
         
-        try:
-            # Calcular páginas
-            all_ids = STICKERS_CONFIG.keys()
-            total_pages = (len(all_ids) + STICKERS_PER_PAGE - 1) // STICKERS_PER_PAGE
-            if total_pages < 1: total_pages = 1
+        if now.hour == 8 and now.minute == 30:
+            if self.last_check_date == now.date():
+                return
             
-            # Gerar imagem em thread separada
-            loop = asyncio.get_running_loop()
-            image_bytes = await loop.run_in_executor(None, StickerGenerator.generate_album_image, user_stickers, 1)
+            self.last_check_date = now.date()
+            await self.announce_birthdays(now.day, now.month)
+
+    async def announce_birthdays(self, day, month):
+        user_ids = await self.bot.db.get_birthdays_by_date(day, month)
+        if not user_ids: return
+
+        # Escolher GIF
+        gif_url = random.choice(BIRTHDAY_GIFS) if BIRTHDAY_GIFS else None
+        
+        for guild in self.bot.guilds:
+            # Encontrar canal
+            target_channel = discord.utils.get(guild.text_channels, name="aniversários")
+            if not target_channel:
+                 target_channel = discord.utils.get(guild.text_channels, name="chat-geral")
+            if not target_channel:
+                 target_channel = discord.utils.get(guild.text_channels, name="geral")
+            if not target_channel:
+                continue # Sem canal, sem anúncio
             
-            file = discord.File(image_bytes, filename="album.png")
-            
-            total = len(STICKERS_CONFIG)
-            owned = len(user_stickers)
-            percent = (owned / total) * 100
-            
-            embed = discord.Embed(
-                title=f"📒 Álbum de {interaction.user.display_name}",
-                description=f"Progresso: **{owned}/{total}** ({percent:.1f}%)",
-                color=0x3498db
-            )
-            embed.set_image(url="attachment://album.png")
-            
-            view = AlbumPaginationView(interaction.user.id, 1, total_pages, user_stickers)
-            
-            await interaction.followup.send(embed=embed, file=file, view=view)
-            
-        except Exception as e:
-            logger.error(f"Erro ao gerar álbum: {e}")
-            await interaction.followup.send("❌ Erro ao gerar álbum.")
+            for uid in user_ids:
+                member = guild.get_member(uid)
+                if member:
+                    embed = discord.Embed(
+                        title=f"🎉 Feliz Aniversário, {member.display_name}! 🎂",
+                         description=f"Hoje é o dia de celebrar mais um ano de vida de {member.mention}!\n\n**Parabéns! Que seu dia seja incrível!** 🥳🎈",
+                         color=0xFFD700
+                    )
+                    if gif_url:
+                        embed.set_image(url=gif_url)
+                    
+                    await target_channel.send(content=f"@everyone Hoje é o dia de {member.mention}! 🎉", embed=embed)
+                    await asyncio.sleep(1) # Delay leve
 
 
 # ==================================================================================================
@@ -1399,7 +1266,6 @@ class OptimizedTicketBot(commands.Bot):
         
         self.prisma = Prisma() # Instancia cliente Prisma
         self.db = DatabaseManager(self.prisma) # Passa para o Manager
-        self.sticker_db = StickerDatabaseManager() 
         self.startup_time = datetime.now()
         self._health_server_started = False
         self.health_server_port = None
@@ -1410,14 +1276,10 @@ class OptimizedTicketBot(commands.Bot):
             await self.prisma.connect()
             logger.info("Prisma conectado.")
             
-            # Inicializar SQLite Stickers
-            if self.sticker_db.init_database():
-                logger.info("SQLite Stickers inicializado")
-
             # Cogs
             await self.add_cog(TicketCommands(self))
             await self.add_cog(AlertCommands(self))
-            await self.add_cog(StickerCommands(self))
+            await self.add_cog(BirthdayCommands(self))
 
             # Sync Comandos
             logger.info("Sincronizando comandos...")

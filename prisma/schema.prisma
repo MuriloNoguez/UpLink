@@ -25,3 +25,11 @@ model tickets {
   @@index([status], map: "idx_tickets_status")
   @@index([user_id], map: "idx_tickets_user_id")
 }
+
+model Birthday {
+  user_id BigInt @id
+  day     Int
+  month   Int
+
+  @@map("birthdays")
+}
